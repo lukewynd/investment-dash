@@ -6,7 +6,7 @@ export default defineConfig({
     proxy: {
       // In dev, /yf/* is proxied to Yahoo Finance to avoid CORS
       '/yf': {
-        target: 'https://query1.finance.yahoo.com',
+        target: 'https://query2.finance.yahoo.com',
         changeOrigin: true,
         rewrite: path => path.replace(/^\/yf/, ''),
       },

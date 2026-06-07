@@ -1,13 +1,22 @@
 // ── Yahoo Finance API wrapper ─────────────────────────────────────────────────
 // In dev:  requests go through the Vite proxy at /yf  (see vite.config.js)
-// In prod: requests are wrapped with allorigins.win to bypass CORS restrictions
+// In prod: corsproxy.io wraps each request to bypass CORS restrictions.
+//
+// For a more reliable production setup, deploy a Cloudflare Worker instead:
+//   https://developers.cloudflare.com/workers/get-started/guide/
+//   Worker code: forward request to query2.finance.yahoo.com, add CORS headers.
+//   Then set PROD_PROXY_BASE to your worker URL (e.g. https://yf.yourname.workers.dev).
 
-const YF_HOST = 'https://query1.finance.yahoo.com';
+const YF_HOST = 'https://query2.finance.yahoo.com';
 
-// Build the final fetch URL, applying the CORS proxy in production.
+// Set to your Cloudflare Worker URL to bypass the public proxy entirely.
+const CF_WORKER_BASE = null; // e.g. 'https://yf.yourname.workers.dev'
+
 function yfUrl(path) {
   if (import.meta.env.DEV) return `/yf${path}`;
-  return `https://api.allorigins.win/raw?url=${encodeURIComponent(YF_HOST + path)}`;
+  const fullUrl = YF_HOST + path;
+  if (CF_WORKER_BASE) return `${CF_WORKER_BASE}${path}`;
+  return `https://corsproxy.io/?${encodeURIComponent(fullUrl)}`;
 }
 
 const QUOTE_CACHE = new Map();
