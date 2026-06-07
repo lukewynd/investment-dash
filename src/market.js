@@ -276,26 +276,24 @@ function buildSectorsPanel(quotes, ytd) {
     </div>`;
 }
 
-// ── Main render ───────────────────────────────────────────────────────────────
+// ── Safe fetch helper ─────────────────────────────────────────────────────────
+// Each section fetches independently — one failure never blocks the others.
 
-function renderContent(container, quotes, ytd) {
-  const ts = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+async function safeFetch(symbols) {
+  try {
+    return await fetchQuotes(symbols);
+  } catch (e) {
+    console.warn('Fetch failed for', symbols, e);
+    return new Map(); // empty map → section renders with "—" placeholders
+  }
+}
 
-  container.querySelector('#mkt-timestamp').textContent = `Updated ${ts}`;
-
-  // Equities
-  const eqEl = container.querySelector('#mkt-equities');
-  eqEl.innerHTML = Object.entries(EQUITIES)
-    .map(([region, items]) => buildEquityTable(region, items, quotes, ytd))
-    .join('');
-
-  // Bonds & FX
-  container.querySelector('#mkt-bonds').innerHTML = buildBondsTable(quotes);
-  container.querySelector('#mkt-fx').innerHTML    = buildFXTable(quotes);
-
-  // Commodities & Sectors
-  container.querySelector('#mkt-commodities').innerHTML = buildCommoditiesTable(quotes);
-  container.querySelector('#mkt-sectors').innerHTML     = buildSectorsPanel(quotes, ytd);
+function sectionError(label) {
+  return `
+    <div class="mkt-panel">
+      <div class="mkt-panel-label">${label}</div>
+      <div class="mkt-section-err">Unable to load — check console for details</div>
+    </div>`;
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -310,11 +308,6 @@ export async function renderMarketTab(container) {
       </div>
     </div>
 
-    <div class="mkt-error" id="mkt-error" style="display:none">
-      Unable to load market data. Yahoo Finance may be temporarily unavailable.
-      <button class="ghost-btn" id="mkt-retry" style="margin-left:12px">Retry</button>
-    </div>
-
     <section class="mkt-section">
       <div class="mkt-section-title">Equity Markets</div>
       <div class="mkt-equities-grid" id="mkt-equities">
@@ -327,47 +320,67 @@ export async function renderMarketTab(container) {
     </section>
 
     <section class="mkt-section mkt-two-col">
-      <div id="mkt-bonds"></div>
-      <div id="mkt-fx"></div>
+      <div id="mkt-bonds"><div class="mkt-panel"><div class="mkt-panel-label">Bond Yields</div><table class="mkt-table"><tbody>${skeletonRows(10, 3)}</tbody></table></div></div>
+      <div id="mkt-fx"><div class="mkt-panel"><div class="mkt-panel-label">FX Rates</div><table class="mkt-table"><tbody>${skeletonRows(8, 3)}</tbody></table></div></div>
     </section>
 
     <section class="mkt-section mkt-two-col">
-      <div id="mkt-commodities"></div>
-      <div id="mkt-sectors"></div>
+      <div id="mkt-commodities"><div class="mkt-panel"><div class="mkt-panel-label">Commodities</div><table class="mkt-table"><tbody>${skeletonRows(8, 3)}</tbody></table></div></div>
+      <div id="mkt-sectors"><div class="mkt-panel"><div class="mkt-panel-label">US Equity Sectors</div><table class="mkt-table"><tbody>${skeletonRows(11, 5)}</tbody></table></div></div>
     </section>
   `;
 
-  const errorEl   = container.querySelector('#mkt-error');
   const refreshBtn = container.querySelector('#mkt-refresh');
 
   async function load() {
-    errorEl.style.display = 'none';
-    try {
-      const quotes = await fetchQuotes(ALL_SYMBOLS);
+    const tsEl = container.querySelector('#mkt-timestamp');
+    tsEl.textContent = 'Loading…';
 
-      // Render 1D data immediately, then fill YTD asynchronously
-      const emptyYtd = new Map();
-      renderContent(container, quotes, emptyYtd);
+    // Fetch all five sections in parallel — each is independently failable
+    const [eqMap, bondMap, fxMap, commMap, secMap] = await Promise.all([
+      safeFetch(ALL_EQUITY_SYMBOLS),
+      safeFetch(BONDS.map(b => b.symbol)),
+      safeFetch(FX.map(f => f.symbol)),
+      safeFetch(COMMODITIES.map(c => c.symbol)),
+      safeFetch(ALL_SECTOR_SYMBOLS),
+    ]);
 
-      // Fetch YTD in background and re-render when done
-      const ytdSymbols = [...ALL_EQUITY_SYMBOLS, ...ALL_SECTOR_SYMBOLS];
-      const ytd = await fetchYTDBatch(ytdSymbols);
-      renderContent(container, quotes, ytd);
-    } catch (e) {
-      console.error('Market data load failed:', e);
-      errorEl.style.display = '';
-      container.querySelector('#mkt-timestamp').textContent = 'Failed to load';
-    }
+    // Render 1D data for each section immediately
+    const eqEl   = container.querySelector('#mkt-equities');
+    const emptyYtd = new Map();
+
+    eqEl.innerHTML = Object.entries(EQUITIES)
+      .map(([region, items]) => buildEquityTable(region, items, eqMap, emptyYtd))
+      .join('');
+
+    const bondsEl = container.querySelector('#mkt-bonds');
+    const fxEl    = container.querySelector('#mkt-fx');
+    const commEl  = container.querySelector('#mkt-commodities');
+    const secEl   = container.querySelector('#mkt-sectors');
+
+    bondsEl.innerHTML = bondMap.size ? buildBondsTable(bondMap)         : sectionError('Bond Yields');
+    fxEl.innerHTML    = fxMap.size   ? buildFXTable(fxMap)              : sectionError('FX Rates');
+    commEl.innerHTML  = commMap.size ? buildCommoditiesTable(commMap)   : sectionError('Commodities');
+    secEl.innerHTML   = secMap.size  ? buildSectorsPanel(secMap, emptyYtd) : sectionError('US Equity Sectors');
+
+    // Fetch YTD in the background; re-render equities + sectors when done
+    const ytdSymbols = [...ALL_EQUITY_SYMBOLS, ...ALL_SECTOR_SYMBOLS];
+    fetchYTDBatch(ytdSymbols).then(ytd => {
+      if (!container.isConnected) return; // tab may have been switched away
+      eqEl.innerHTML = Object.entries(EQUITIES)
+        .map(([region, items]) => buildEquityTable(region, items, eqMap, ytd))
+        .join('');
+      if (secMap.size) secEl.innerHTML = buildSectorsPanel(secMap, ytd);
+    });
+
+    const ts = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    tsEl.textContent = `Updated ${ts}`;
   }
 
   refreshBtn.addEventListener('click', load);
-  container.querySelector('#mkt-error').addEventListener('click', e => {
-    if (e.target.id === 'mkt-retry') load();
-  });
 
   await load();
 
-  // Auto-refresh every 60 seconds
   const timer = setInterval(load, 60_000);
   return () => clearInterval(timer);
 }

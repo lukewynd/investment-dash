@@ -288,6 +288,13 @@ td.dn, td.dn .sec-bar { color: var(--red);   }
 .sec-bar.dn { background: var(--red);   }
 
 /* ── Misc market helpers ──────────────────────────────── */
+.mkt-section-err {
+  padding: 20px 14px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 .mkt-flag { margin-right: 6px; }
 
 .mkt-unit {
