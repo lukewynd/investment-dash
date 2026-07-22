@@ -61,7 +61,7 @@ function activateTab(contentEl, tab) {
   if (tab === 'market') {
     renderMarketTab(contentEl).then(teardown => { _teardown = teardown ?? null; });
   } else if (tab === 'stock') {
-    renderStockTab(contentEl);
+    renderStockTab(contentEl).then(teardown => { _teardown = teardown ?? null; });
   } else if (tab === 'portfolio') {
     renderPortfolioTab(contentEl);
   }

@@ -13,6 +13,14 @@ const YF_HOST = 'https://query2.finance.yahoo.com';
 // Set to your Cloudflare Worker URL to bypass corsproxy.io entirely.
 const CF_WORKER_BASE = 'https://yf-proxy.lukewynd.workers.dev';
 
+// General URL builder for arbitrary Yahoo Finance paths (no pre-encoded characters in path).
+// Used by other tabs (stock, portfolio) that construct their own paths.
+export function buildYfUrl(path) {
+  if (import.meta.env.DEV) return `/yf${path}`;
+  if (CF_WORKER_BASE) return `${CF_WORKER_BASE}${path}`;
+  return `https://corsproxy.io/?${encodeURIComponent(YF_HOST + path)}`;
+}
+
 // Build a fetch URL for one symbol, avoiding double-encoding when wrapping with a proxy.
 // rawSymbol is the un-encoded ticker (e.g. '^GSPC', 'GC=F').
 function yfChartUrl(rawSymbol) {
