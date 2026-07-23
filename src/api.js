@@ -25,7 +25,7 @@ export function buildYfUrl(path) {
 // rawSymbol is the un-encoded ticker (e.g. '^GSPC', 'GC=F').
 function yfChartUrl(rawSymbol) {
   const encoded = encodeURIComponent(rawSymbol);
-  const params  = 'range=ytd&interval=1d';
+  const params  = 'range=1y&interval=1d';
 
   if (import.meta.env.DEV) {
     return `/yf/v8/finance/chart/${encoded}?${params}`;
@@ -68,14 +68,52 @@ async function fetchSymbol(symbol) {
       : null;
     const regularMarketChange = (price != null && prev != null) ? price - prev : null;
 
+    // Multi-period returns from 1y daily closes array
+    const n = closes.length;
+
+    // 1D: if market is currently open, regularMarketPrice differs from last close → use last close as base
+    // If closed, last close IS current price → use second-to-last close as base
+    const lastClose = closes[n - 1];
+    const prevClose = closes[n - 2] ?? null;
+    let pct1d = regularMarketChangePercent; // fallback to meta-derived
+    if (price != null && lastClose != null) {
+      const diffFromLast = Math.abs(price - lastClose) / (lastClose || 1);
+      const base1d = diffFromLast < 0.0001 ? prevClose : lastClose;
+      pct1d = (base1d != null && base1d !== 0) ? ((price - base1d) / base1d) * 100 : regularMarketChangePercent;
+    }
+
+    const closeAt = (offset) => {
+      const c = closes[n - offset];
+      return (c != null && price != null && c !== 0) ? ((price - c) / c) * 100 : null;
+    };
+
+    // YTD: find first close of current calendar year
+    const nowYear = new Date().getFullYear();
+    const timestamps = result.timestamp ?? [];
+    let ytdBase = null;
+    for (let i = 0; i < timestamps.length; i++) {
+      if (new Date(timestamps[i] * 1000).getFullYear() === nowYear && closes[i] != null) {
+        ytdBase = closes[i];
+        break;
+      }
+    }
+    const pctYtd = (ytdBase != null && ytdBase !== 0 && price != null)
+      ? ((price - ytdBase) / ytdBase) * 100
+      : ytdPct;
+
     const data = {
       symbol,
       regularMarketPrice: price,
-      regularMarketChangePercent,
+      regularMarketChangePercent: pct1d,
       regularMarketChange,
       chartPreviousClose: prev,
       quoteType: meta.instrumentType ?? '',
-      ytdPct,
+      ytdPct: pctYtd,
+      pct1d,
+      pct1w:  closeAt(6),
+      pct1m:  closeAt(22),
+      pct3m:  closeAt(64),
+      pctYtd,
     };
 
     SYMBOL_CACHE.set(symbol, { ts: Date.now(), data });

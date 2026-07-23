@@ -139,67 +139,87 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   gap: 16px;
   flex-wrap: wrap;
 }
 
-.mkt-title { font-size: 18px; font-weight: 500; }
-
-.mkt-topbar-right {
+.mkt-topbar-left {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 12px;
 }
 
+.mkt-title { font-size: 18px; font-weight: 500; }
+
 .mkt-timestamp {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-faint);
   font-family: var(--font-mono);
 }
 
 .mkt-refresh-btn { font-size: 13px; padding: 5px 12px; }
 
-.mkt-error {
-  background: var(--red-bg);
-  border: 1px solid var(--red);
-  border-radius: var(--radius-md);
-  color: var(--red);
-  font-size: 13px;
-  padding: 12px 16px;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .mkt-section {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
-.mkt-section-title {
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-faint);
-  margin-bottom: 12px;
-}
-
-/* Equities: 3 equal-width panels */
-.mkt-equities-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-/* Bonds/FX and Commodities/Sectors: 2 columns */
+/* Bonds+FX and Commodities+Sectors: 2 equal columns */
 .mkt-two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
+
+/* ── Quick stat strip ─────────────────────────────────── */
+.mkt-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.mkt-stat-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mkt-stat-name {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+}
+
+.mkt-stat-price {
+  font-size: 20px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mkt-stat-chg {
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.mkt-stat-ytd {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+
+.mkt-stat-chg.up, .mkt-stat-ytd.up { color: var(--green); }
+.mkt-stat-chg.dn, .mkt-stat-ytd.dn { color: var(--red);   }
 
 /* ── Market panel ─────────────────────────────────────── */
 .mkt-panel {
@@ -208,8 +228,6 @@ body {
   border-radius: var(--radius-md);
   overflow: hidden;
 }
-
-.mkt-panel-wide { grid-column: span 1; }
 
 .mkt-panel-label {
   font-size: 11px;
@@ -241,14 +259,25 @@ body {
 }
 
 .mkt-table td {
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 
 .mkt-table tr:last-child td { border-bottom: none; }
-
 .mkt-table tr:hover td { background: var(--bg-hover); }
+
+/* Region / group separator rows */
+.mkt-region-sep td {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  background: var(--bg-surface) !important;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border);
+}
 
 .mkt-name {
   color: var(--text-primary);
@@ -262,23 +291,48 @@ body {
   color: var(--text-muted);
 }
 
+.mono { font-family: var(--font-mono); }
+
 .mkt-table th.num { text-align: right; }
 
 /* Performance colours */
-td.up, td.up .sec-bar { color: var(--green); }
-td.dn, td.dn .sec-bar { color: var(--red);   }
+td.up { color: var(--green); }
+td.dn { color: var(--red);   }
+
+/* Intensity highlight for big moves (>3%) */
+td.up.strong { color: var(--green); background: rgba(52,211,153,0.08); }
+td.dn.strong { color: var(--red);   background: rgba(248,113,113,0.08); }
+
+/* Percent cells — give a bit of extra right padding so numbers breathe */
+td.pct-cell { min-width: 60px; }
+
+/* ── Yield curve bar ──────────────────────────────────── */
+.yc-bar-cell {
+  width: 90px;
+  padding: 7px 8px;
+}
+
+.yc-bar {
+  display: inline-block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: 0.55;
+  min-width: 3px;
+  vertical-align: middle;
+}
 
 /* ── Sector bar chart ─────────────────────────────────── */
-.sec-table .sec-name { max-width: 160px; }
+.sec-name { max-width: 160px; }
 
 .sec-bar-cell {
-  width: 80px;
-  padding: 8px 6px;
+  width: 72px;
+  padding: 7px 6px;
 }
 
 .sec-bar {
   display: inline-block;
-  height: 8px;
+  height: 7px;
   border-radius: 4px;
   min-width: 2px;
   vertical-align: middle;
@@ -295,12 +349,18 @@ td.dn, td.dn .sec-bar { color: var(--red);   }
   font-style: italic;
 }
 
-.mkt-flag { margin-right: 6px; }
-
 .mkt-unit {
   font-size: 10px;
   color: var(--text-faint);
-  margin-left: 3px;
+  margin-left: 4px;
+}
+
+.mkt-abbr {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  margin-left: 4px;
+  text-transform: uppercase;
 }
 
 /* ── Skeleton loader ──────────────────────────────────── */
@@ -460,9 +520,9 @@ td.dn, td.dn .sec-bar { color: var(--red);   }
 .sa-no-data { color: var(--text-muted); font-size: 13px; padding: 20px 0; }
 
 /* ── Responsive ───────────────────────────────────────── */
-@media (max-width: 1024px) {
-  .mkt-equities-grid { grid-template-columns: 1fr 1fr; }
-  .sa-fund-grid      { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 1100px) {
+  .mkt-stat-strip { grid-template-columns: repeat(3, 1fr); }
+  .sa-fund-grid   { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 700px) {
@@ -471,8 +531,8 @@ td.dn, td.dn .sec-bar { color: var(--red);   }
 
   .tab { padding: 6px 10px; font-size: 12px; }
 
-  .mkt-equities-grid { grid-template-columns: 1fr; }
-  .mkt-two-col       { grid-template-columns: 1fr; }
-  .sa-fund-grid      { grid-template-columns: repeat(2, 1fr); }
-  .sa-controls       { flex-direction: column; align-items: flex-start; }
+  .mkt-stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .mkt-two-col    { grid-template-columns: 1fr; }
+  .sa-fund-grid   { grid-template-columns: repeat(2, 1fr); }
+  .sa-controls    { flex-direction: column; align-items: flex-start; }
 }
