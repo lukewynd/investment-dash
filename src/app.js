@@ -63,6 +63,7 @@ function activateTab(contentEl, tab) {
   } else if (tab === 'stock') {
     renderStockTab(contentEl).then(teardown => { _teardown = teardown ?? null; });
   } else if (tab === 'portfolio') {
-    renderPortfolioTab(contentEl);
+    const td = renderPortfolioTab(contentEl);
+    _teardown = td ?? null;
   }
 }
