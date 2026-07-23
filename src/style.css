@@ -363,6 +363,76 @@ td.pct-cell { min-width: 60px; }
   text-transform: uppercase;
 }
 
+.mkt-panel-sub {
+  font-size: 9px;
+  color: var(--text-faint);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 8px;
+}
+
+/* ── FX cross-rate matrix ─────────────────────────────── */
+.fx-matrix-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fx-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.fx-matrix th,
+.fx-matrix td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.fx-matrix thead th {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-surface);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
+.fx-matrix tbody tr:last-child td,
+.fx-matrix tbody tr:last-child th { border-bottom: none; }
+
+.fx-matrix tbody tr:hover td,
+.fx-matrix tbody tr:hover th.fx-row-hdr { background: var(--bg-hover); }
+
+.fx-row-hdr {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.fx-col-hdr { text-align: right; }
+
+.fx-cell { color: var(--text-primary); }
+
+.fx-diag {
+  color: var(--text-faint);
+  background: var(--bg-base);
+  text-align: center;
+}
+
 /* ── Skeleton loader ──────────────────────────────────── */
 .skel {
   display: inline-block;

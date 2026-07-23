@@ -55,39 +55,29 @@ async function fetchSymbol(symbol) {
     const meta   = result.meta;
     const closes = result.indicators?.quote?.[0]?.close ?? [];
 
-    const first = closes.find(c => c != null);
-    const last  = [...closes].reverse().find(c => c != null);
-    const ytdPct = (first != null && last != null && first !== 0)
-      ? ((last - first) / first) * 100
-      : null;
+    const price  = meta.regularMarketPrice  ?? null;
+    // meta.regularMarketChange is the actual current-session $ change — independent of chart range.
+    // (meta.chartPreviousClose with range=1y is the year-ago close, NOT yesterday's close.)
+    const change = meta.regularMarketChange ?? null;
+    const prevClose1d = (price != null && change != null) ? price - change : null;
+    const pct1d = (prevClose1d != null && prevClose1d !== 0) ? (change / prevClose1d) * 100 : null;
 
-    const price = meta.regularMarketPrice ?? null;
-    const prev  = meta.chartPreviousClose ?? null;
-    const regularMarketChangePercent = (price != null && prev != null && prev !== 0)
-      ? ((price - prev) / prev) * 100
-      : null;
-    const regularMarketChange = (price != null && prev != null) ? price - prev : null;
-
-    // Multi-period returns from 1y daily closes array
+    // Multi-period returns — walk back from last valid close in the 1y array.
     const n = closes.length;
+    let lastValidIdx = n - 1;
+    while (lastValidIdx >= 0 && closes[lastValidIdx] == null) lastValidIdx--;
+    const effectivePrice = price ?? (lastValidIdx >= 0 ? closes[lastValidIdx] : null);
 
-    // 1D: if market is currently open, regularMarketPrice differs from last close → use last close as base
-    // If closed, last close IS current price → use second-to-last close as base
-    const lastClose = closes[n - 1];
-    const prevClose = closes[n - 2] ?? null;
-    let pct1d = regularMarketChangePercent; // fallback to meta-derived
-    if (price != null && lastClose != null) {
-      const diffFromLast = Math.abs(price - lastClose) / (lastClose || 1);
-      const base1d = diffFromLast < 0.0001 ? prevClose : lastClose;
-      pct1d = (base1d != null && base1d !== 0) ? ((price - base1d) / base1d) * 100 : regularMarketChangePercent;
-    }
-
-    const closeAt = (offset) => {
-      const c = closes[n - offset];
-      return (c != null && price != null && c !== 0) ? ((price - c) / c) * 100 : null;
+    const closeAtOffset = (offset) => {
+      let idx = lastValidIdx - offset;
+      while (idx >= 0 && closes[idx] == null) idx--;
+      const c = idx >= 0 ? closes[idx] : null;
+      return (c != null && effectivePrice != null && c !== 0)
+        ? ((effectivePrice - c) / c) * 100
+        : null;
     };
 
-    // YTD: find first close of current calendar year
+    // YTD: first close of current calendar year
     const nowYear = new Date().getFullYear();
     const timestamps = result.timestamp ?? [];
     let ytdBase = null;
@@ -97,22 +87,21 @@ async function fetchSymbol(symbol) {
         break;
       }
     }
-    const pctYtd = (ytdBase != null && ytdBase !== 0 && price != null)
-      ? ((price - ytdBase) / ytdBase) * 100
-      : ytdPct;
+    const pctYtd = (ytdBase != null && ytdBase !== 0 && effectivePrice != null)
+      ? ((effectivePrice - ytdBase) / ytdBase) * 100
+      : null;
 
     const data = {
       symbol,
       regularMarketPrice: price,
       regularMarketChangePercent: pct1d,
-      regularMarketChange,
-      chartPreviousClose: prev,
+      regularMarketChange: change,
       quoteType: meta.instrumentType ?? '',
       ytdPct: pctYtd,
       pct1d,
-      pct1w:  closeAt(6),
-      pct1m:  closeAt(22),
-      pct3m:  closeAt(64),
+      pct1w:  closeAtOffset(5),
+      pct1m:  closeAtOffset(21),
+      pct3m:  closeAtOffset(63),
       pctYtd,
     };
 

@@ -44,16 +44,19 @@ const BONDS = [
   { symbol: '^TYX', name: '30-Year' },
 ];
 
-const FX = [
-  { symbol: 'EURUSD=X', name: 'EUR/USD', decimals: 4 },
-  { symbol: 'GBPUSD=X', name: 'GBP/USD', decimals: 4 },
-  { symbol: 'USDJPY=X', name: 'USD/JPY', decimals: 2 },
-  { symbol: 'AUDUSD=X', name: 'AUD/USD', decimals: 4 },
-  { symbol: 'USDCAD=X', name: 'USD/CAD', decimals: 4 },
-  { symbol: 'USDCHF=X', name: 'USD/CHF', decimals: 4 },
-  { symbol: 'USDCNY=X', name: 'USD/CNY', decimals: 4 },
-  { symbol: 'USDINR=X', name: 'USD/INR', decimals: 2 },
+// FX currencies for the cross-rate matrix.
+// invert=true: Yahoo quotes it as "USD per unit" → invert to get "USD per that currency".
+// e.g. USDJPY=X = 150 JPY per USD → usdPerJPY = 1/150.
+const FX_CURRENCIES = [
+  { code: 'USD', name: 'US Dollar',   symbol: null,       invert: false },
+  { code: 'EUR', name: 'Euro',        symbol: 'EURUSD=X', invert: false },
+  { code: 'GBP', name: 'Sterling',    symbol: 'GBPUSD=X', invert: false },
+  { code: 'JPY', name: 'Yen',         symbol: 'USDJPY=X', invert: true  },
+  { code: 'AUD', name: 'Aus Dollar',  symbol: 'AUDUSD=X', invert: false },
+  { code: 'CAD', name: 'Can Dollar',  symbol: 'USDCAD=X', invert: true  },
+  { code: 'CHF', name: 'Swiss Franc', symbol: 'USDCHF=X', invert: true  },
 ];
+const FX_SYMBOLS = FX_CURRENCIES.filter(c => c.symbol).map(c => c.symbol);
 
 const COMMODITIES = [
   { symbol: 'GC=F',  name: 'Gold',        unit: '/oz',    group: 'Metals'  },
@@ -92,7 +95,7 @@ const ALL_SYMBOLS = [
     ...STAT_STRIP.map(s => s.symbol),
     ...EQUITIES.map(e => e.symbol),
     ...BONDS.map(b => b.symbol),
-    ...FX.map(f => f.symbol),
+    ...FX_SYMBOLS,
     ...COMMODITIES.map(c => c.symbol),
     ...SECTORS.map(s => s.symbol),
     ...CRYPTO.map(c => c.symbol),
@@ -238,35 +241,47 @@ function buildBondsPanel(quotes) {
     </div>`;
 }
 
-function buildFXTable(quotes) {
-  const rows = FX.map(({ symbol, name, decimals }) => {
-    const q = quotes.get(symbol);
-    const p = q?.regularMarketPrice;
-    const priceStr = p != null ? p.toFixed(decimals) : '—';
-    return `<tr>
-      <td class="mkt-name">${name}</td>
-      <td class="num mono">${priceStr}</td>
-      ${pctCell(q?.pct1d)}
-      ${pctCell(q?.pct1w)}
-      ${pctCell(q?.pct1m)}
-      ${pctCell(q?.pctYtd)}
-    </tr>`;
+function buildFXMatrix(quotes) {
+  // Build usdPer[code] = how many USD buy 1 unit of that currency
+  const usdPer = { USD: 1 };
+  FX_CURRENCIES.forEach(({ code, symbol, invert }) => {
+    if (!symbol) return;
+    const rate = quotes.get(symbol)?.regularMarketPrice;
+    if (rate != null) usdPer[code] = invert ? 1 / rate : rate;
+  });
+
+  // Format a cross-rate value; use fewer decimals for large numbers (e.g. JPY pairs)
+  const fmtRate = (v) => {
+    if (v == null) return '—';
+    if (v >= 100) return v.toFixed(2);
+    if (v >= 10)  return v.toFixed(3);
+    return v.toFixed(4);
+  };
+
+  const codes = FX_CURRENCIES.map(c => c.code);
+
+  const headerCells = codes.map(c => `<th class="num fx-col-hdr">${c}</th>`).join('');
+
+  const bodyRows = codes.map(rowCode => {
+    const cells = codes.map(colCode => {
+      if (rowCode === colCode) return `<td class="fx-diag">—</td>`;
+      const uRow = usdPer[rowCode];
+      const uCol = usdPer[colCode];
+      const rate = (uRow != null && uCol != null && uCol !== 0) ? uRow / uCol : null;
+      return `<td class="num fx-cell">${fmtRate(rate)}</td>`;
+    }).join('');
+    return `<tr><th class="fx-row-hdr">${rowCode}</th>${cells}</tr>`;
   }).join('');
 
   return `
     <div class="mkt-panel">
-      <div class="mkt-panel-label">FX Rates</div>
-      <table class="mkt-table">
-        <thead><tr>
-          <th>Pair</th>
-          <th class="num">Rate</th>
-          <th class="num">1D</th>
-          <th class="num">1W</th>
-          <th class="num">1M</th>
-          <th class="num">YTD</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="mkt-panel-label">FX Cross Rates <span class="mkt-panel-sub">1 row = X column</span></div>
+      <div class="fx-matrix-wrap">
+        <table class="fx-matrix">
+          <thead><tr><th></th>${headerCells}</tr></thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 
@@ -429,8 +444,8 @@ export async function renderMarketTab(container) {
       </div>
       <div id="mkt-fx">
         <div class="mkt-panel">
-          <div class="mkt-panel-label">FX Rates</div>
-          <table class="mkt-table"><tbody>${skeletonRows(8, 6)}</tbody></table>
+          <div class="mkt-panel-label">FX Cross Rates</div>
+          <div class="fx-matrix-wrap"><span class="skel" style="display:block;height:160px;margin:14px"></span></div>
         </div>
       </div>
     </section>
@@ -472,7 +487,7 @@ export async function renderMarketTab(container) {
     container.querySelector('#mkt-stats').innerHTML     = buildStatStrip(quotes);
     container.querySelector('#mkt-equities').innerHTML  = buildEquitiesTable(quotes);
     container.querySelector('#mkt-bonds').innerHTML     = buildBondsPanel(quotes);
-    container.querySelector('#mkt-fx').innerHTML        = buildFXTable(quotes);
+    container.querySelector('#mkt-fx').innerHTML        = buildFXMatrix(quotes);
     container.querySelector('#mkt-commodities').innerHTML = buildCommoditiesTable(quotes);
     container.querySelector('#mkt-sectors').innerHTML   = buildSectorsPanel(quotes);
     container.querySelector('#mkt-crypto').innerHTML    = buildCryptoPanel(quotes);
