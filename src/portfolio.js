@@ -67,14 +67,26 @@ async function quickLookup(symbol) {
 
 // ── Math engine ────────────────────────────────────────────────────────────────
 
+// Normalize unix timestamp to YYYY-MM-DD date key.
+// +12h offset absorbs timezone differences between markets:
+//   AU midnight AEST = prev-day 14:00 UTC → +12h → same-day 02:00 UTC → correct date.
+//   US midnight UTC → +12h → 12:00 UTC → correct date.
+function tsToDateKey(ts) {
+  const d = new Date((ts + 43200) * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+}
+
 function alignSeries(seriesArr) {
-  const sets   = seriesArr.map(s => new Set(s.map(r => r.date)));
-  const common = [...sets[0]].filter(d => sets.every(s => s.has(d))).sort((a, b) => a - b);
-  const aligned = seriesArr.map(s => {
-    const m = new Map(s.map(r => [r.date, r.ret]));
-    return common.map(d => m.get(d) ?? 0);
+  // Normalize timestamps → date strings, union all dates, forward-fill missing with 0.
+  const normalised = seriesArr.map(s => s.map(r => ({ key: tsToDateKey(r.date), ret: r.ret })));
+  const allKeys = new Set();
+  normalised.forEach(s => s.forEach(r => allKeys.add(r.key)));
+  const sorted = [...allKeys].sort(); // YYYY-MM-DD sorts lexicographically
+  const aligned = normalised.map(s => {
+    const m = new Map(s.map(r => [r.key, r.ret]));
+    return sorted.map(k => m.get(k) ?? 0); // 0 = market closed / holiday
   });
-  return { dates: common, aligned };
+  return { dates: sorted, aligned }; // dates are YYYY-MM-DD strings
 }
 
 function ewmaCov(retMatrix, hl) {
@@ -274,8 +286,8 @@ function attrTable(labels, weights, retMatrix, dates, period) {
   const offsets = { '1d': 1, '1w': 5, '1m': 21, '3m': 63 };
   let startIdx;
   if (period === 'ytd') {
-    const yr = new Date().getFullYear();
-    startIdx = dates.findIndex(d => new Date(d * 1000).getFullYear() === yr);
+    const yr = String(new Date().getFullYear());
+    startIdx = dates.findIndex(d => d.startsWith(yr));
     if (startIdx < 0) startIdx = 0;
   } else {
     startIdx = Math.max(0, T - (offsets[period] ?? 1));
@@ -341,23 +353,19 @@ async function drawNavChart(container, dates, portNav, bmkNav) {
     timeScale:       { borderColor: '#22253a' },
   });
 
-  const toTs = d => {
-    const dt = new Date(d * 1000);
-    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-  };
-
+  // dates are already YYYY-MM-DD strings — pass directly to lightweight-charts
   const portSer = chart.addLineSeries({ color: '#7c6af7', lineWidth: 2, title: 'Portfolio' });
   const bmkSer  = chart.addLineSeries({ color: '#4b5563', lineWidth: 1, lineStyle: 2, title: 'S&P 500' });
 
   function applyMode(mode) {
     if (mode === 'cumret') {
-      portSer.setData(dates.map((d, i) => ({ time: toTs(d), value: +((portNav[i] - 1) * 100).toFixed(3) })));
-      bmkSer.setData(dates.map((d, i) => ({ time: toTs(d), value: +((bmkNav[i]  - 1) * 100).toFixed(3) })));
+      portSer.setData(dates.map((d, i) => ({ time: d, value: +((portNav[i] - 1) * 100).toFixed(3) })));
+      bmkSer.setData(dates.map((d, i) => ({ time: d, value: +((bmkNav[i]  - 1) * 100).toFixed(3) })));
     } else {
       let pk = 1;
       portSer.setData(dates.map((d, i) => {
         if (portNav[i] > pk) pk = portNav[i];
-        return { time: toTs(d), value: +((portNav[i] / pk - 1) * 100).toFixed(3) };
+        return { time: d, value: +((portNav[i] / pk - 1) * 100).toFixed(3) };
       }));
       bmkSer.setData([]);
     }
