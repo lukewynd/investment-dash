@@ -37,11 +37,20 @@ const EQUITIES = [
   { symbol: '^STI',      name: 'Straits Times', region: 'Asia-Pacific' },
 ];
 
-const BONDS = [
+const US_TREASURIES = [
   { symbol: '^IRX', name: '3-Month' },
   { symbol: '^FVX', name: '5-Year'  },
   { symbol: '^TNX', name: '10-Year' },
   { symbol: '^TYX', name: '30-Year' },
+];
+
+// Yahoo does not expose consistent cash 10Y benchmark symbols globally.
+// These liquid ETFs provide transparent, tradable price proxies instead.
+const GLOBAL_BOND_PROXIES = [
+  { symbol: 'BWX',  name: 'Global ex-US Treasuries', region: 'Global' },
+  { symbol: 'IGOV', name: 'International Treasuries', region: 'Developed' },
+  { symbol: 'EMB',  name: 'Emerging Market Sovereign', region: 'Emerging' },
+  { symbol: 'EWJ',  name: 'Japan rates proxy', region: 'Japan' },
 ];
 
 // FX currencies for the cross-rate matrix.
@@ -94,7 +103,8 @@ const ALL_SYMBOLS = [
   ...new Set([
     ...STAT_STRIP.map(s => s.symbol),
     ...EQUITIES.map(e => e.symbol),
-    ...BONDS.map(b => b.symbol),
+    ...US_TREASURIES.map(b => b.symbol),
+    ...GLOBAL_BOND_PROXIES.map(b => b.symbol),
     ...FX_SYMBOLS,
     ...COMMODITIES.map(c => c.symbol),
     ...SECTORS.map(s => s.symbol),
@@ -204,7 +214,7 @@ function buildEquitiesTable(quotes) {
 }
 
 function buildBondsPanel(quotes) {
-  const bondData = BONDS.map(({ symbol, name }) => {
+  const bondData = US_TREASURIES.map(({ symbol, name }) => {
     const q   = quotes.get(symbol);
     const yld = q?.regularMarketPrice ?? null;
     const chg = q?.regularMarketChange ?? null;
@@ -228,7 +238,7 @@ function buildBondsPanel(quotes) {
 
   return `
     <div class="mkt-panel">
-      <div class="mkt-panel-label">US Treasuries</div>
+      <div class="mkt-panel-label">US Treasuries · cash curve</div>
       <table class="mkt-table">
         <thead><tr>
           <th>Tenor</th>
@@ -239,6 +249,30 @@ function buildBondsPanel(quotes) {
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+}
+
+function buildGlobalBondsPanel(quotes) {
+  const rows = GLOBAL_BOND_PROXIES.map(({ symbol, name, region }) => {
+    const q = quotes.get(symbol);
+    const price = q?.regularMarketPrice;
+    const oneDay = fmtPct(q?.pct1d);
+    const oneMonth = fmtPct(q?.pct1m);
+    const ytd = fmtPct(q?.pctYtd);
+    return `<tr>
+      <td><span class="mkt-name">${name}</span><span class="mkt-unit">${region}</span></td>
+      <td class="num mono">${price != null ? fmtPrice(price) : '—'}</td>
+      <td class="num pct-cell ${oneDay.cls}">${oneDay.text}</td>
+      <td class="num pct-cell ${oneMonth.cls}">${oneMonth.text}</td>
+      <td class="num pct-cell ${ytd.cls}">${ytd.text}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="mkt-panel">
+    <div class="mkt-panel-label">Global Bond Markets · price proxies</div>
+    <table class="mkt-table">
+      <thead><tr><th>Instrument</th><th class="num">Level</th><th class="num">1D</th><th class="num">1M</th><th class="num">YTD</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
 }
 
 function buildFXMatrix(quotes) {
@@ -409,10 +443,10 @@ export async function renderMarketTab(container) {
   container.innerHTML = `
     <div class="mkt-topbar">
       <div class="mkt-topbar-left">
-        <h2 class="mkt-title">Market Overview</h2>
-        <span class="mkt-timestamp" id="mkt-timestamp">Loading…</span>
+        <div><div class="eyebrow">01 / MACRO MONITOR</div><h1 class="mkt-title">Global cross-asset pulse</h1><p class="mkt-dek">A compact read on risk appetite, rates, dollar liquidity and the real economy.</p></div>
+        <span class="mkt-timestamp" id="mkt-timestamp">Connecting…</span>
       </div>
-      <button class="ghost-btn mkt-refresh-btn" id="mkt-refresh">↺ Refresh</button>
+      <div class="mkt-actions"><span class="data-note">Indicative · delayed</span><button class="ghost-btn mkt-refresh-btn" id="mkt-refresh">Refresh data</button></div>
     </div>
 
     <!-- Quick Stats Strip -->
@@ -447,6 +481,13 @@ export async function renderMarketTab(container) {
           <div class="mkt-panel-label">FX Cross Rates</div>
           <div class="fx-matrix-wrap"><span class="skel" style="display:block;height:160px;margin:14px"></span></div>
         </div>
+      </div>
+    </section>
+
+    <section class="mkt-section" id="mkt-global-bonds">
+      <div class="mkt-panel">
+        <div class="mkt-panel-label">Global Bond Markets · price proxies</div>
+        <table class="mkt-table"><tbody>${skeletonRows(4, 5)}</tbody></table>
       </div>
     </section>
 
@@ -488,12 +529,14 @@ export async function renderMarketTab(container) {
     container.querySelector('#mkt-equities').innerHTML  = buildEquitiesTable(quotes);
     container.querySelector('#mkt-bonds').innerHTML     = buildBondsPanel(quotes);
     container.querySelector('#mkt-fx').innerHTML        = buildFXMatrix(quotes);
+    container.querySelector('#mkt-global-bonds').innerHTML = buildGlobalBondsPanel(quotes);
     container.querySelector('#mkt-commodities').innerHTML = buildCommoditiesTable(quotes);
     container.querySelector('#mkt-sectors').innerHTML   = buildSectorsPanel(quotes);
     container.querySelector('#mkt-crypto').innerHTML    = buildCryptoPanel(quotes);
 
     const ts = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
-    tsEl.textContent = `Updated ${ts}`;
+    const failures = ALL_SYMBOLS.length - quotes.size;
+    tsEl.textContent = `Updated ${ts} · ${quotes.size}/${ALL_SYMBOLS.length} instruments${failures ? ` · ${failures} unavailable` : ''}`;
   }
 
   refreshBtn.addEventListener('click', load);

@@ -5,29 +5,25 @@ import { renderStockTab }     from './stock.js';
 import { renderPortfolioTab } from './portfolio.js';
 
 const TABS = ['market', 'stock', 'portfolio'];
-const TAB_LABELS = { market: 'Markets', stock: 'Stock Analysis', portfolio: 'Portfolio' };
+const TAB_LABELS = { market: 'Macro monitor', stock: 'Single name', portfolio: 'Portfolio lab' };
+const TAB_KICKERS = { market: '01', stock: '02', portfolio: '03' };
 
 let _activeTab   = 'market';
 let _teardown    = null;   // cleanup fn returned by active tab
 
 export function renderApp(root) {
   root.innerHTML = `
-    <div class="topbar">
-      <div class="topbar-left">
-        <div class="logo">invest<span>.</span>dash</div>
-      </div>
-      <div class="topbar-center">
-        <div class="tabs" id="main-tabs">
-          ${TABS.map(t => `
-            <button class="tab ${t === _activeTab ? 'active' : ''}" data-tab="${t}">
-              ${TAB_LABELS[t]}
-            </button>`).join('')}
-        </div>
-      </div>
-      <div class="topbar-right"></div>
+    <div class="app-frame">
+      <header class="topbar">
+        <div class="brand-lockup"><div class="logo">MACRO MONITOR</div><div class="brand-sub">GLOBAL MULTI-ASSET RESEARCH</div></div>
+        <div class="topbar-center"><nav class="tabs" id="main-tabs">
+          ${TABS.map(t => `<button class="tab ${t === _activeTab ? 'active' : ''}" data-tab="${t}"><span class="tab-num">${TAB_KICKERS[t]}</span>${TAB_LABELS[t]}</button>`).join('')}
+        </nav></div>
+        <div class="topbar-right"><span class="market-status"><i></i> DATA LINKED</span><span class="topbar-date">${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span></div>
+      </header>
+      <main class="main-content" id="tab-content"></main>
+      <footer class="app-footer"><span>NSM / TERMINAL</span><span>MARKET DATA: YAHOO FINANCE · DELAYED / INDICATIVE</span><span>LOCAL SESSION</span></footer>
     </div>
-
-    <div class="main-content" id="tab-content"></div>
   `;
 
   const tabsEl   = root.querySelector('#main-tabs');

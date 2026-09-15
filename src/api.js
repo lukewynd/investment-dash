@@ -16,8 +16,8 @@ const CF_WORKER_BASE = 'https://yf-proxy.lukewynd.workers.dev';
 // General URL builder for arbitrary Yahoo Finance paths (no pre-encoded characters in path).
 // Used by other tabs (stock, portfolio) that construct their own paths.
 export function buildYfUrl(path) {
-  if (import.meta.env.DEV) return `/yf${path}`;
   if (CF_WORKER_BASE) return `${CF_WORKER_BASE}${path}`;
+  if (import.meta.env.DEV) return `/yf${path}`;
   return `https://corsproxy.io/?${encodeURIComponent(YF_HOST + path)}`;
 }
 
@@ -27,11 +27,9 @@ function yfChartUrl(rawSymbol) {
   const encoded = encodeURIComponent(rawSymbol);
   const params  = 'range=1y&interval=1d';
 
-  if (import.meta.env.DEV) {
-    return `/yf/v8/finance/chart/${encoded}?${params}`;
-  }
-  const fullUrl = `${YF_HOST}/v8/finance/chart/${encoded}?${params}`;
   if (CF_WORKER_BASE) return `${CF_WORKER_BASE}/v8/finance/chart/${encoded}?${params}`;
+  if (import.meta.env.DEV) return `/yf/v8/finance/chart/${encoded}?${params}`;
+  const fullUrl = `${YF_HOST}/v8/finance/chart/${encoded}?${params}`;
   return `https://corsproxy.io/?${encodeURIComponent(fullUrl)}`;
 }
 
@@ -55,18 +53,22 @@ async function fetchSymbol(symbol) {
     const meta   = result.meta;
     const closes = result.indicators?.quote?.[0]?.close ?? [];
 
-    const price  = meta.regularMarketPrice  ?? null;
-    // meta.regularMarketChange is the actual current-session $ change — independent of chart range.
-    // (meta.chartPreviousClose with range=1y is the year-ago close, NOT yesterday's close.)
-    const change = meta.regularMarketChange ?? null;
-    const prevClose1d = (price != null && change != null) ? price - change : null;
-    const pct1d = (prevClose1d != null && prevClose1d !== 0) ? (change / prevClose1d) * 100 : null;
+    const lastValid = (from) => {
+      for (let i = from; i >= 0; i--) if (closes[i] != null) return { index: i, value: closes[i] };
+      return null;
+    };
+    const lastClose = lastValid(closes.length - 1);
+    const priorClose = lastClose ? lastValid(lastClose.index - 1) : null;
+    const livePrice = meta.regularMarketPrice ?? null;
+    const price = livePrice ?? lastClose?.value ?? null;
+    const referencePrice = priorClose?.value ?? null;
+    const change = price != null && referencePrice != null ? price - referencePrice : null;
+    const pct1d = change != null && referencePrice !== 0 ? (change / referencePrice) * 100 : null;
 
     // Multi-period returns — walk back from last valid close in the 1y array.
     const n = closes.length;
-    let lastValidIdx = n - 1;
-    while (lastValidIdx >= 0 && closes[lastValidIdx] == null) lastValidIdx--;
-    const effectivePrice = price ?? (lastValidIdx >= 0 ? closes[lastValidIdx] : null);
+    const lastValidIdx = lastClose?.index ?? -1;
+    const effectivePrice = price;
 
     const closeAtOffset = (offset) => {
       let idx = lastValidIdx - offset;
@@ -96,6 +98,9 @@ async function fetchSymbol(symbol) {
       regularMarketPrice: price,
       regularMarketChangePercent: pct1d,
       regularMarketChange: change,
+      previousClose: referencePrice,
+      dataTimestamp: result.timestamp?.[lastValidIdx] ?? null,
+      source: 'Yahoo Finance chart',
       quoteType: meta.instrumentType ?? '',
       ytdPct: pctYtd,
       pct1d,
@@ -127,4 +132,13 @@ export async function fetchAll(symbols) {
     });
   }
   return results;
+}
+
+export async function fetchChart(symbol, range = '1y', interval = '1d', signal) {
+  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`;
+  const response = await fetch(buildYfUrl(path), { headers: { Accept: 'application/json' }, signal });
+  if (!response.ok) throw new Error(`Market data request failed (${response.status})`);
+  const result = (await response.json())?.chart?.result?.[0];
+  if (!result) throw new Error(`No market data returned for ${symbol}`);
+  return result;
 }

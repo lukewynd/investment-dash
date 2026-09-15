@@ -100,15 +100,29 @@ async function fetchFundamentals(symbol) {
   const hit = fundsCache.get(symbol);
   if (hit && Date.now() - hit.ts < TTL) return hit.data;
 
-  const mods = 'price,summaryDetail,defaultKeyStatistics,financialData,assetProfile';
-  const path = `/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${mods}`;
-  const r    = await fetch(buildYfUrl(path), { headers: { Accept: 'application/json' } });
-  if (!r.ok) return null;
-
-  const j    = await r.json();
-  const data = j?.quoteSummary?.result?.[0] ?? null;
-  if (data) fundsCache.set(symbol, { ts: Date.now(), data });
-  return data;
+  // quoteSummary now requires an authenticated Yahoo crumb. The public
+  // fundamentals-timeseries endpoint still exposes a useful, transparent
+  // subset without pretending unavailable fields are current.
+  const types = ['annualTotalRevenue', 'annualGrossProfit', 'annualOperatingIncome', 'annualNetIncome', 'annualDilutedEPS'];
+  const period2 = Math.floor(Date.now() / 1000);
+  const period1 = period2 - 370 * 24 * 60 * 60;
+  const path = `/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=${types.join(',')}&period1=${period1}&period2=${period2}`;
+  try {
+    const r = await fetch(buildYfUrl(path), { headers: { Accept: 'application/json' } });
+    if (!r.ok) return null;
+    const rows = (await r.json())?.timeseries?.result ?? [];
+    const latest = (type) => rows.find(row => row.meta?.symbol?.includes?.(symbol) && row[type]?.length)?.[type]?.at(-1)?.reportedValue?.raw ?? null;
+    const revenue = latest('annualTotalRevenue');
+    const grossProfit = latest('annualGrossProfit');
+    const operatingIncome = latest('annualOperatingIncome');
+    const data = { financialData: {
+      totalRevenue: { raw: revenue },
+      grossMargins: { raw: revenue && grossProfit ? grossProfit / revenue : null },
+      operatingMargins: { raw: revenue && operatingIncome ? operatingIncome / revenue : null },
+    }, defaultKeyStatistics: { trailingEps: { raw: latest('annualDilutedEPS') } } };
+    fundsCache.set(symbol, { ts: Date.now(), data });
+    return data;
+  } catch { return null; }
 }
 
 // ── Formatting ────────────────────────────────────────────────────────────────
