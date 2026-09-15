@@ -267,7 +267,7 @@ body {
 .mkt-table tr:last-child td { border-bottom: none; }
 .mkt-table tr:hover td { background: var(--bg-hover); }
 
-/* ── Northstar terminal skin ────────────────────────── */
+/* ── Macro Monitor terminal skin ────────────────────── */
 :root {
   --bg-base: #111413;
   --bg-surface: #171b18;

@@ -26,9 +26,9 @@ const RANGES = [
 ];
 
 const MA_DEFS = {
-  ma20:  { period: 20,  color: '#fbbf24', label: 'MA 20'  },
-  ma50:  { period: 50,  color: '#60a5fa', label: 'MA 50'  },
-  ma200: { period: 200, color: '#f87171', label: 'MA 200' },
+  ma20:  { period: 20,  color: '#fbbf24', label: 'MA 20D'  },
+  ma50:  { period: 50,  color: '#60a5fa', label: 'MA 50D'  },
+  ma200: { period: 200, color: '#f87171', label: 'MA 200D' },
 };
 
 // ── Technical indicators ──────────────────────────────────────────────────────
@@ -40,6 +40,21 @@ function sma(candles, period) {
     out.push({ time: candles[i].time, value: +(sum / period).toFixed(4) });
   }
   return out;
+}
+
+// Calculate a daily indicator and sample it onto the chart's display dates.
+// This keeps MA 200 meaning 200 trading sessions even on weekly/monthly views.
+function smaAtDisplayDates(candles, period, displayCandles) {
+  const values = sma(candles, period);
+  let valueIndex = 0;
+  let latest = null;
+  return displayCandles.map(candle => {
+    while (valueIndex < values.length && values[valueIndex].time <= candle.time) {
+      latest = values[valueIndex].value;
+      valueIndex += 1;
+    }
+    return latest == null ? null : { time: candle.time, value: latest };
+  }).filter(Boolean);
 }
 
 function bollinger(candles, period = 20, mult = 2) {
@@ -94,6 +109,24 @@ async function fetchPriceData(symbol, range, interval) {
   const data = { candles, volumes, meta: result.meta };
   priceCache.set(key, { ts: Date.now(), data });
   return data;
+}
+
+async function fetchIndicatorData(symbol) {
+  const key = `${symbol}:indicator-history`;
+  const hit = priceCache.get(key);
+  if (hit && Date.now() - hit.ts < TTL) return hit.data;
+  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=10y&interval=1d&includePrePost=false`;
+  const r = await fetch(buildYfUrl(path), { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const result = (await r.json())?.chart?.result?.[0];
+  if (!result) throw new Error('Indicator history unavailable');
+  const times = result.timestamp ?? [];
+  const closes = result.indicators?.quote?.[0]?.close ?? [];
+  const candles = times.map((timestamp, i) => closes[i] == null ? null : ({
+    time: toDateStr(timestamp), close: +closes[i].toFixed(4),
+  })).filter(Boolean);
+  priceCache.set(key, { ts: Date.now(), data: candles });
+  return candles;
 }
 
 async function fetchFundamentals(symbol) {
@@ -251,9 +284,9 @@ export async function renderStockTab(container) {
               <button class="sa-opt" data-type="line">Line</button>
             </div>
             <div class="sa-ind-group">
-              <button class="sa-opt" data-ind="ma20">MA 20</button>
-              <button class="sa-opt" data-ind="ma50">MA 50</button>
-              <button class="sa-opt" data-ind="ma200">MA 200</button>
+              <button class="sa-opt" data-ind="ma20">MA 20D</button>
+              <button class="sa-opt" data-ind="ma50">MA 50D</button>
+              <button class="sa-opt" data-ind="ma200">MA 200D</button>
               <button class="sa-opt" data-ind="bb">BB</button>
               <button class="sa-opt active" data-ind="vol">Vol</button>
               <button class="sa-opt" id="sa-annot-btn">+ Line</button>
@@ -284,6 +317,7 @@ export async function renderStockTab(container) {
   let chartType    = 'candle';
   let rawCandles   = [];
   let rawVolumes   = [];
+  let indicatorCandles = [];
   let rangeIdx     = 4;            // 1Y default
   let curSymbol    = null;
   let resizeObs    = null;
@@ -395,9 +429,9 @@ export async function renderStockTab(container) {
 
     // Moving averages
     for (const [key, cfg] of Object.entries(MA_DEFS)) {
-      if (!activeInds.has(key) || rawCandles.length < cfg.period) continue;
+      if (!activeInds.has(key) || indicatorCandles.length < cfg.period) continue;
       sm[key] = chart.addLineSeries({ color: cfg.color, lineWidth: 1, title: cfg.label });
-      sm[key].setData(sma(rawCandles, cfg.period));
+      sm[key].setData(smaAtDisplayDates(indicatorCandles, cfg.period, rawCandles));
     }
 
     // Bollinger Bands
@@ -448,12 +482,14 @@ export async function renderStockTab(container) {
 
     try {
       await ensureChart();
-      const [priceData, funds] = await Promise.all([
+      const [priceData, indicatorData, funds] = await Promise.all([
         fetchPriceData(symbol, range, interval),
+        fetchIndicatorData(symbol),
         fetchFundamentals(symbol),
       ]);
       rawCandles = priceData.candles;
       rawVolumes = priceData.volumes;
+      indicatorCandles = indicatorData;
       renderHeader(elHdr, priceData.meta, funds);
       await applyData();
       renderFundamentals(elFunds, funds);

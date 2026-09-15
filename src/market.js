@@ -217,22 +217,29 @@ function buildBondsPanel(quotes) {
   const bondData = US_TREASURIES.map(({ symbol, name }) => {
     const q   = quotes.get(symbol);
     const yld = q?.regularMarketPrice ?? null;
-    const chg = q?.regularMarketChange ?? null;
-    return { name, yld, chg };
+    return {
+      name,
+      yld,
+      change1d: q?.change1d ?? null,
+      change1w: q?.change1w ?? null,
+      change1m: q?.change1m ?? null,
+      change3m: q?.change3m ?? null,
+      changeYtd: q?.changeYtd ?? null,
+    };
   });
 
   // Yield curve bars — normalize to max yield
   const maxYld = Math.max(0.01, ...bondData.map(b => b.yld ?? 0));
 
-  const rows = bondData.map(({ name, yld, chg }) => {
-    const bps    = fmtBps(chg);
+  const rows = bondData.map(({ name, yld, change1d, change1w, change1m, change3m, changeYtd }) => {
+    const bps = [change1d, change1w, change1m, change3m, changeYtd].map(fmtBps);
     const yldStr = yld != null ? yld.toFixed(2) + '%' : '—';
     const barW   = yld != null ? (yld / maxYld) * 100 : 0;
     return `<tr>
       <td class="mkt-name">${name}</td>
       <td class="num mono">${yldStr}</td>
       <td class="yc-bar-cell"><span class="yc-bar" style="width:${barW.toFixed(1)}%"></span></td>
-      <td class="num pct-cell ${bps.cls}">${bps.text}</td>
+      ${bps.map(value => `<td class="num pct-cell ${value.cls}">${value.text}</td>`).join('')}
     </tr>`;
   }).join('');
 
@@ -244,7 +251,11 @@ function buildBondsPanel(quotes) {
           <th>Tenor</th>
           <th class="num">Yield</th>
           <th></th>
-          <th class="num">1D Chg</th>
+          <th class="num">1D</th>
+          <th class="num">1W</th>
+          <th class="num">1M</th>
+          <th class="num">3M</th>
+          <th class="num">YTD</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -473,7 +484,7 @@ export async function renderMarketTab(container) {
       <div id="mkt-bonds">
         <div class="mkt-panel">
           <div class="mkt-panel-label">US Treasuries</div>
-          <table class="mkt-table"><tbody>${skeletonRows(4, 4)}</tbody></table>
+          <table class="mkt-table"><tbody>${skeletonRows(4, 8)}</tbody></table>
         </div>
       </div>
       <div id="mkt-fx">

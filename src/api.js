@@ -79,6 +79,16 @@ async function fetchSymbol(symbol) {
         : null;
     };
 
+    const closeValueAtOffset = (offset) => {
+      let idx = lastValidIdx - offset;
+      while (idx >= 0 && closes[idx] == null) idx--;
+      return idx >= 0 ? closes[idx] : null;
+    };
+    const changeAtOffset = (offset) => {
+      const base = closeValueAtOffset(offset);
+      return base != null && effectivePrice != null ? effectivePrice - base : null;
+    };
+
     // YTD: first close of current calendar year
     const nowYear = new Date().getFullYear();
     const timestamps = result.timestamp ?? [];
@@ -108,6 +118,11 @@ async function fetchSymbol(symbol) {
       pct1m:  closeAtOffset(21),
       pct3m:  closeAtOffset(63),
       pctYtd,
+      change1d: change,
+      change1w: changeAtOffset(5),
+      change1m: changeAtOffset(21),
+      change3m: changeAtOffset(63),
+      changeYtd: ytdBase != null && effectivePrice != null ? effectivePrice - ytdBase : null,
     };
 
     SYMBOL_CACHE.set(symbol, { ts: Date.now(), data });
