@@ -454,7 +454,7 @@ export async function renderMarketTab(container) {
   container.innerHTML = `
     <div class="mkt-topbar">
       <div class="mkt-topbar-left">
-        <div><div class="eyebrow">01 / MACRO MONITOR</div><h1 class="mkt-title">Global cross-asset pulse</h1><p class="mkt-dek">A compact read on risk appetite, rates, dollar liquidity and the real economy.</p></div>
+        <div><div class="eyebrow">01 / MACRO MONITOR</div><h1 class="mkt-title">Global cross-asset pulse</h1></div>
         <span class="mkt-timestamp" id="mkt-timestamp">Connecting…</span>
       </div>
       <div class="mkt-actions"><span class="data-note">Indicative · delayed</span><button class="ghost-btn mkt-refresh-btn" id="mkt-refresh">Refresh data</button></div>
