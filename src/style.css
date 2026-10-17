@@ -610,6 +610,17 @@ td.pct-cell { min-width: 60px; }
 .sa-hdr-chg    { font-size: 14px; font-family: var(--font-mono); text-align: right; margin-top: 2px; }
 .sa-hdr-loading { color: var(--text-muted); font-size: 14px; padding: 8px 0; }
 
+.sa-instruments { display: flex; flex-wrap: wrap; gap: 6px; }
+.sa-instrument-row { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 4px 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-surface); }
+.sa-instrument-row.active { border-color: var(--border-light); }
+.sa-instrument-swatch { width: 9px; height: 9px; flex: none; border-radius: 50%; background: var(--instrument-color); }
+.sa-instrument-focus { border: 0; background: none; color: var(--text-primary); font: 11px var(--font-mono); cursor: pointer; }
+.sa-instrument-name { max-width: 170px; overflow: hidden; color: var(--text-faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.sa-axis-label { color: var(--text-faint); font: 9px var(--font-mono); text-transform: uppercase; }
+.sa-axis-select { padding: 3px 5px; border: 1px solid var(--border-light); border-radius: 2px; background: var(--bg-elevated); color: var(--text-muted); font: 10px var(--font-mono); }
+.sa-instrument-remove { width: 20px; height: 20px; border: 0; background: transparent; color: var(--text-faint); font: 17px/1 var(--font-main); cursor: pointer; }
+.sa-instrument-remove:hover { color: var(--red); }
+
 /* Controls */
 .sa-controls {
   display: flex; justify-content: space-between; align-items: center;
@@ -622,7 +633,7 @@ td.pct-cell { min-width: 60px; }
   font-family: var(--font-mono); cursor: pointer; transition: all 0.15s;
 }
 .sa-range-btn:hover { color: var(--text-primary); border-color: var(--border-light); }
-.sa-range-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(124,106,247,0.1); }
+.sa-range-btn.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, transparent); }
 
 .sa-opts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .sa-type-group, .sa-ind-group { display: flex; gap: 4px; }
@@ -633,7 +644,13 @@ td.pct-cell { min-width: 60px; }
   font-size: 12px; font-family: var(--font-mono); cursor: pointer; transition: all 0.15s;
 }
 .sa-opt:hover  { color: var(--text-primary); }
-.sa-opt.active { color: var(--accent); border-color: var(--accent); background: rgba(124,106,247,0.12); }
+.sa-opt.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.sa-level-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-surface); }
+.sa-tool-label { font: 10px var(--font-mono); color: var(--text-faint); letter-spacing: .08em; margin-right: 4px; }
+.sa-level-input { width: 130px; min-width: 0; padding: 5px 8px; border: 1px solid var(--border-light); border-radius: 3px; background: var(--bg-elevated); color: var(--text-primary); font: 12px var(--font-mono); }
+.sa-level-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.sa-tool-hint { color: var(--text-faint); font-size: 11px; margin-left: auto; }
 
 /* Chart */
 .sa-chart-wrap {
@@ -659,16 +676,20 @@ td.pct-cell { min-width: 60px; }
 }
 .sa-tt-date { color: var(--text-faint); margin-right: 8px; }
 .sa-tt b    { color: var(--text-primary); }
+.sa-tt-instrument { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; }
+.sa-tt-instrument i { width: 7px; height: 7px; border-radius: 50%; }
 
 /* Annotation pills */
 .sa-annot-wrap  { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .sa-annot-pills { display: flex; gap: 6px; flex-wrap: wrap; }
 .sa-annot-pill  {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(124,106,247,0.12); border: 1px solid rgba(124,106,247,0.3);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 20px; padding: 3px 10px; font-size: 12px;
   font-family: var(--font-mono); color: var(--accent);
 }
+.sa-clear-levels { border: 0; background: transparent; color: var(--text-faint); font: 11px var(--font-main); cursor: pointer; padding: 3px 6px; }
+.sa-clear-levels:hover { color: var(--red); }
 .sa-annot-x {
   background: none; border: none; color: var(--text-muted);
   cursor: pointer; font-size: 14px; line-height: 1; padding: 0;

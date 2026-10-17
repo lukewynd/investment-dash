@@ -264,7 +264,7 @@ export async function renderStockTab(container) {
       <div class="sa-search-bar">
         <select class="sa-market-sel" id="sa-mkt">${marketOpts}</select>
         <input class="sa-ticker-inp" id="sa-ticker" type="text" placeholder="Ticker (e.g. AAPL)" spellcheck="false" autocomplete="off" />
-        <button class="ghost-btn sa-go-btn" id="sa-go">Search</button>
+        <button class="ghost-btn sa-go-btn" id="sa-go">Add to chart</button>
       </div>
 
       <div class="sa-placeholder" id="sa-ph">
@@ -275,13 +275,14 @@ export async function renderStockTab(container) {
 
       <div class="sa-main" id="sa-main" style="display:none">
         <div class="sa-hdr" id="sa-hdr"></div>
+        <div class="sa-instruments" id="sa-instruments" aria-label="Chart instruments"></div>
 
         <div class="sa-controls">
           <div class="sa-ranges">${rangeBtns}</div>
           <div class="sa-opts">
             <div class="sa-type-group">
-              <button class="sa-opt active" data-type="candle">Candle</button>
-              <button class="sa-opt" data-type="line">Line</button>
+              <button class="sa-opt" data-type="candle">Candle</button>
+              <button class="sa-opt active" data-type="line">Line</button>
             </div>
             <div class="sa-ind-group">
               <button class="sa-opt" data-ind="ma20">MA 20D</button>
@@ -289,9 +290,16 @@ export async function renderStockTab(container) {
               <button class="sa-opt" data-ind="ma200">MA 200D</button>
               <button class="sa-opt" data-ind="bb">BB</button>
               <button class="sa-opt active" data-ind="vol">Vol</button>
-              <button class="sa-opt" id="sa-annot-btn">+ Line</button>
             </div>
           </div>
+        </div>
+
+        <div class="sa-level-tools" role="group" aria-label="Price level tools">
+          <span class="sa-tool-label">PRICE LEVELS</span>
+          <input class="sa-level-input" id="sa-level-input" type="number" inputmode="decimal" step="any" placeholder="Enter price" aria-label="Price level" />
+          <button class="sa-opt" id="sa-level-add">Add level</button>
+          <button class="sa-opt" id="sa-annot-btn" type="button" aria-pressed="false" title="Click the chart repeatedly to add horizontal levels">Place on chart</button>
+          <span class="sa-tool-hint">Or click the chart to place multiple levels</span>
         </div>
 
         <div class="sa-chart-wrap" id="sa-chart-wrap">
@@ -310,22 +318,22 @@ export async function renderStockTab(container) {
 
   // ── State ───────────────────────────────────────────────────────────────────
   let chart        = null;
-  let sm           = {};           // series map
+  let sm           = {};
+  let instruments  = new Map();
+  let activeSymbol  = null;
   let annotLines   = [];
+  let nextAnnotId  = 1;
   let annotMode    = false;
   let activeInds   = new Set(['vol']);
-  let chartType    = 'candle';
-  let rawCandles   = [];
-  let rawVolumes   = [];
-  let indicatorCandles = [];
+  let chartType    = 'line';
   let rangeIdx     = 4;            // 1Y default
-  let curSymbol    = null;
   let resizeObs    = null;
 
   // ── Element refs ────────────────────────────────────────────────────────────
   const elPh      = container.querySelector('#sa-ph');
   const elMain    = container.querySelector('#sa-main');
   const elHdr     = container.querySelector('#sa-hdr');
+  const elInstrumentList = container.querySelector('#sa-instruments');
   const elChartEl = container.querySelector('#sa-chart');
   const elOverlay = container.querySelector('#sa-overlay');
   const elTT      = container.querySelector('#sa-tt');
@@ -335,6 +343,8 @@ export async function renderStockTab(container) {
   const elTicker  = container.querySelector('#sa-ticker');
   const elGo      = container.querySelector('#sa-go');
   const elAnnotBtn = container.querySelector('#sa-annot-btn');
+  const elLevelInput = container.querySelector('#sa-level-input');
+  const elLevelAdd = container.querySelector('#sa-level-add');
 
   // ── Chart init ──────────────────────────────────────────────────────────────
   async function ensureChart() {
@@ -366,32 +376,26 @@ export async function renderStockTab(container) {
 
     // Crosshair tooltip
     chart.subscribeCrosshairMove(param => {
-      if (!param.time || !param.point || !sm.main) { elTT.style.display = 'none'; return; }
-      const d = param.seriesData.get(sm.main);
-      if (!d) { elTT.style.display = 'none'; return; }
-      const isCandle = 'open' in d;
-      const priceHtml = isCandle
-        ? `O <b>${d.open}</b>  H <b>${d.high}</b>  L <b>${d.low}</b>  C <b>${d.close}</b>`
-        : `<b>${d.value?.toFixed(4)}</b>`;
-      const vol = param.seriesData.get(sm.vol);
-      const volHtml = vol ? `  Vol <b>${fmtN(vol.value)}</b>` : '';
-      elTT.innerHTML = `<span class="sa-tt-date">${param.time}</span>  ${priceHtml}${volHtml}`;
+      if (!param.time || !param.point) { elTT.style.display = 'none'; return; }
+      const rows = [...instruments.values()].map(instrument => {
+        const series = sm[instrument.symbol]?.main;
+        const point = series && param.seriesData.get(series);
+        if (!point) return '';
+        const value = 'close' in point ? point.close : point.value;
+        return `<span class="sa-tt-instrument"><i style="background:${instrument.color}"></i>${instrument.symbol} <b>${Number(value).toLocaleString('en-US', { maximumFractionDigits: 4 })}</b></span>`;
+      }).filter(Boolean).join('');
+      if (!rows) { elTT.style.display = 'none'; return; }
+      elTT.innerHTML = `<span class="sa-tt-date">${param.time}</span>${rows}`;
       elTT.style.display = 'block';
     });
 
     // Click → add price line when in annotation mode
     chart.subscribeClick(param => {
-      if (!annotMode || !param.point || !sm.main) return;
-      const price = sm.main.coordinateToPrice(param.point.y);
+      const main = activeSymbol && sm[activeSymbol]?.main;
+      if (!annotMode || !param.point || !main) return;
+      const price = main.coordinateToPrice(param.point.y);
       if (price == null) return;
-      const { LineStyle } = _lwc;
-      const pl = sm.main.createPriceLine({
-        price, color: '#7c6af7', lineWidth: 1,
-        lineStyle: LineStyle.Dashed, axisLabelVisible: true,
-        title: price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-      });
-      annotLines.push({ pl, price });
-      renderAnnotList();
+      addPriceLevel(price, activeSymbol);
     });
   }
 
@@ -399,51 +403,76 @@ export async function renderStockTab(container) {
   async function applyData() {
     const { LineStyle } = await getLWC();
 
-    Object.values(sm).forEach(s => { try { chart.removeSeries(s); } catch {} });
+    Object.values(sm).flatMap(series => Object.values(series)).forEach(series => {
+      try { chart.removeSeries(series); } catch {}
+    });
     sm = {};
-    annotLines = [];
+    annotLines.forEach(level => { level.line = null; });
     renderAnnotList();
 
-    // Volume (behind main, separate price scale)
-    if (activeInds.has('vol')) {
-      sm.vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
-      chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-      sm.vol.setData(rawVolumes);
+    chart.priceScale('left').applyOptions({ visible: true, borderColor: '#2a2d3e', scaleMargins: { top: 0.06, bottom: activeInds.has('vol') ? 0.22 : 0.04 } });
+    chart.priceScale('right').applyOptions({ visible: true, borderColor: '#2a2d3e', scaleMargins: { top: 0.06, bottom: activeInds.has('vol') ? 0.22 : 0.04 } });
+
+    const palette = ['#e3a857', '#63a7d8', '#d77d72', '#72b58a', '#bc91cf', '#d9ca68', '#55b9b3', '#e28dab'];
+    for (const [index, instrument] of [...instruments.values()].entries()) {
+      instrument.color = palette[index % palette.length];
+      const priceScaleId = instrument.axis;
+      sm[instrument.symbol] = {};
+      if (chartType === 'candle') {
+        sm[instrument.symbol].main = chart.addCandlestickSeries({
+          priceScaleId,
+          upColor: '#65c18c', downColor: '#df7c70', borderVisible: false,
+          wickUpColor: '#65c18c', wickDownColor: '#df7c70',
+        });
+        sm[instrument.symbol].main.setData(instrument.priceData.candles);
+      } else {
+        sm[instrument.symbol].main = chart.addLineSeries({ color: instrument.color, lineWidth: 2, priceScaleId, title: instrument.symbol });
+        sm[instrument.symbol].main.setData(instrument.priceData.candles.map(c => ({ time: c.time, value: c.close })));
+      }
+
+      for (const [key, cfg] of Object.entries(MA_DEFS)) {
+        if (!activeInds.has(key) || instrument.indicatorCandles.length < cfg.period) continue;
+        sm[instrument.symbol][key] = chart.addLineSeries({ color: cfg.color, lineWidth: 1, title: `${instrument.symbol} ${cfg.label}`, priceScaleId });
+        sm[instrument.symbol][key].setData(smaAtDisplayDates(instrument.indicatorCandles, cfg.period, instrument.priceData.candles));
+      }
+
+      if (activeInds.has('bb') && instrument.priceData.candles.length >= 20) {
+        const { upper, mid, lower } = bollinger(instrument.priceData.candles);
+        sm[instrument.symbol].bbU = chart.addLineSeries({ color: 'rgba(124,106,247,0.8)', lineWidth: 1, lineStyle: LineStyle.Dashed, priceScaleId });
+        sm[instrument.symbol].bbM = chart.addLineSeries({ color: 'rgba(124,106,247,0.4)', lineWidth: 1, priceScaleId });
+        sm[instrument.symbol].bbL = chart.addLineSeries({ color: 'rgba(124,106,247,0.8)', lineWidth: 1, lineStyle: LineStyle.Dashed, priceScaleId });
+        sm[instrument.symbol].bbU.setData(upper); sm[instrument.symbol].bbM.setData(mid); sm[instrument.symbol].bbL.setData(lower);
+      }
     }
 
-    // Main price series
-    chart.priceScale('right').applyOptions({
-      scaleMargins: { top: 0.06, bottom: activeInds.has('vol') ? 0.22 : 0.04 },
+    const volumeInstrument = instruments.values().next().value;
+    if (activeInds.has('vol') && volumeInstrument) {
+      sm[volumeInstrument.symbol].vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
+      chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+      sm[volumeInstrument.symbol].vol.setData(volumeInstrument.priceData.volumes);
+    }
+
+    annotLines.forEach(level => {
+      const series = sm[level.symbol]?.main;
+      level.line = series ? createPriceLine(level.price, level.symbol) : null;
     });
 
-    if (chartType === 'candle') {
-      sm.main = chart.addCandlestickSeries({
-        upColor: '#34d399', downColor: '#f87171', borderVisible: false,
-        wickUpColor: '#34d399', wickDownColor: '#f87171',
-      });
-      sm.main.setData(rawCandles);
-    } else {
-      sm.main = chart.addLineSeries({ color: '#7c6af7', lineWidth: 2 });
-      sm.main.setData(rawCandles.map(c => ({ time: c.time, value: c.close })));
-    }
-
-    // Moving averages
-    for (const [key, cfg] of Object.entries(MA_DEFS)) {
-      if (!activeInds.has(key) || indicatorCandles.length < cfg.period) continue;
-      sm[key] = chart.addLineSeries({ color: cfg.color, lineWidth: 1, title: cfg.label });
-      sm[key].setData(smaAtDisplayDates(indicatorCandles, cfg.period, rawCandles));
-    }
-
-    // Bollinger Bands
-    if (activeInds.has('bb') && rawCandles.length >= 20) {
-      const { upper, mid, lower } = bollinger(rawCandles);
-      sm.bbU = chart.addLineSeries({ color: 'rgba(124,106,247,0.8)', lineWidth: 1, lineStyle: LineStyle.Dashed });
-      sm.bbM = chart.addLineSeries({ color: 'rgba(124,106,247,0.4)', lineWidth: 1 });
-      sm.bbL = chart.addLineSeries({ color: 'rgba(124,106,247,0.8)', lineWidth: 1, lineStyle: LineStyle.Dashed });
-      sm.bbU.setData(upper); sm.bbM.setData(mid); sm.bbL.setData(lower);
-    }
-
     chart.timeScale().fitContent();
+  }
+
+  function createPriceLine(price, symbol) {
+    const { LineStyle } = _lwc;
+    return sm[symbol].main.createPriceLine({
+      price, color: instruments.get(symbol)?.color ?? '#e3a857', lineWidth: 1,
+      lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+      title: `${symbol} ${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    });
+  }
+
+  function addPriceLevel(price, symbol = activeSymbol) {
+    if (!Number.isFinite(price) || !sm[symbol]?.main) return;
+    annotLines.push({ id: nextAnnotId++, price, symbol, line: createPriceLine(price, symbol) });
+    renderAnnotList();
   }
 
   // ── Annotation list ─────────────────────────────────────────────────────────
@@ -453,26 +482,101 @@ export async function renderStockTab(container) {
       <div class="sa-annot-wrap">
         <span class="sa-section-label">Price Levels</span>
         <div class="sa-annot-pills">
-          ${annotLines.map((a, i) => `
+          ${annotLines.map(a => `
             <span class="sa-annot-pill">
-              ${a.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              <button class="sa-annot-x" data-i="${i}">×</button>
+              ${a.symbol} · ${a.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <button class="sa-annot-x" data-id="${a.id}" aria-label="Remove price level ${a.price}" title="Remove level">×</button>
             </span>`).join('')}
+          ${annotLines.length > 1 ? '<button class="sa-clear-levels" type="button">Clear all</button>' : ''}
         </div>
       </div>`;
     elAnnot.querySelectorAll('.sa-annot-x').forEach(b => {
       b.addEventListener('click', () => {
-        const i = +b.dataset.i;
-        try { sm.main.removePriceLine(annotLines[i].pl); } catch {}
-        annotLines.splice(i, 1);
+        const id = Number(b.dataset.id);
+        const index = annotLines.findIndex(level => level.id === id);
+        if (index < 0) return;
+        try { if (annotLines[index].line) sm[annotLines[index].symbol]?.main.removePriceLine(annotLines[index].line); } catch {}
+        annotLines.splice(index, 1);
         renderAnnotList();
       });
     });
+    elAnnot.querySelector('.sa-clear-levels')?.addEventListener('click', () => {
+      annotLines.forEach(level => {
+        try { if (level.line) sm[level.symbol]?.main.removePriceLine(level.line); } catch {}
+      });
+      annotLines = [];
+      renderAnnotList();
+    });
+  }
+
+  function renderInstrumentControls() {
+    elInstrumentList.innerHTML = [...instruments.values()].map(instrument => `
+      <div class="sa-instrument-row${instrument.symbol === activeSymbol ? ' active' : ''}" data-symbol="${instrument.symbol}">
+        <span class="sa-instrument-swatch" style="--instrument-color:${instrument.color}"></span>
+        <button class="sa-instrument-focus" type="button" data-focus="${instrument.symbol}" title="Focus ${instrument.symbol}">${instrument.symbol}</button>
+        <span class="sa-instrument-name">${instrument.name}</span>
+        <label class="sa-axis-label" for="axis-${encodeURIComponent(instrument.symbol)}">Axis</label>
+        <select class="sa-axis-select" id="axis-${encodeURIComponent(instrument.symbol)}" data-axis="${instrument.symbol}" aria-label="Price axis for ${instrument.symbol}">
+          <option value="left"${instrument.axis === 'left' ? ' selected' : ''}>Left</option>
+          <option value="right"${instrument.axis === 'right' ? ' selected' : ''}>Right</option>
+        </select>
+        <button class="sa-instrument-remove" type="button" data-remove="${instrument.symbol}" aria-label="Remove ${instrument.symbol}" title="Remove ${instrument.symbol}">×</button>
+      </div>`).join('');
+
+    elInstrumentList.querySelectorAll('[data-focus]').forEach(button => {
+      button.addEventListener('click', () => focusInstrument(button.dataset.focus));
+    });
+    elInstrumentList.querySelectorAll('[data-axis]').forEach(select => {
+      select.addEventListener('change', async () => {
+        const instrument = instruments.get(select.dataset.axis);
+        if (!instrument) return;
+        instrument.axis = select.value;
+        await applyData();
+      });
+    });
+    elInstrumentList.querySelectorAll('[data-remove]').forEach(button => {
+      button.addEventListener('click', () => removeInstrument(button.dataset.remove));
+    });
+  }
+
+  function focusInstrument(symbol) {
+    const instrument = instruments.get(symbol);
+    if (!instrument) return;
+    activeSymbol = symbol;
+    renderInstrumentControls();
+    renderHeader(elHdr, instrument.priceData.meta, instrument.funds);
+    renderFundamentals(elFunds, instrument.funds);
+  }
+
+  async function removeInstrument(symbol) {
+    if (!instruments.has(symbol)) return;
+    instruments.delete(symbol);
+    annotLines = annotLines.filter(level => level.symbol !== symbol);
+    if (activeSymbol === symbol) activeSymbol = [...instruments.keys()].at(-1) ?? null;
+    if (!instruments.size) {
+      elMain.style.display = 'none';
+      elPh.style.display = 'flex';
+      elHdr.innerHTML = '';
+      elFunds.innerHTML = '';
+      renderAnnotList();
+      renderInstrumentControls();
+      await applyData();
+      return;
+    }
+    const active = instruments.get(activeSymbol);
+    renderHeader(elHdr, active.priceData.meta, active.funds);
+    renderFundamentals(elFunds, active.funds);
+    renderInstrumentControls();
+    renderAnnotList();
+    await applyData();
   }
 
   // ── Load stock ──────────────────────────────────────────────────────────────
   async function loadStock(symbol) {
-    curSymbol = symbol;
+    if (instruments.has(symbol)) {
+      focusInstrument(symbol);
+      return;
+    }
     const { range, interval } = RANGES[rangeIdx];
     elOverlay.style.display = 'flex';
     elPh.style.display      = 'none';
@@ -487,10 +591,19 @@ export async function renderStockTab(container) {
         fetchIndicatorData(symbol),
         fetchFundamentals(symbol),
       ]);
-      rawCandles = priceData.candles;
-      rawVolumes = priceData.volumes;
-      indicatorCandles = indicatorData;
+      const instrument = {
+        symbol,
+        name: priceData.meta.longName || priceData.meta.shortName || symbol,
+        priceData,
+        indicatorCandles: indicatorData,
+        funds,
+        axis: instruments.size === 0 ? 'right' : (instruments.size % 2 ? 'left' : 'right'),
+        color: '#e3a857',
+      };
+      instruments.set(symbol, instrument);
+      activeSymbol = symbol;
       renderHeader(elHdr, priceData.meta, funds);
+      renderInstrumentControls();
       await applyData();
       renderFundamentals(elFunds, funds);
     } catch {
@@ -502,14 +615,19 @@ export async function renderStockTab(container) {
   }
 
   async function changeRange(idx) {
-    if (!curSymbol) return;
+    if (!instruments.size) return;
     rangeIdx = idx;
     container.querySelectorAll('.sa-range-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
     const { range, interval } = RANGES[idx];
     elOverlay.style.display = 'flex';
     try {
-      const d = await fetchPriceData(curSymbol, range, interval);
-      rawCandles = d.candles; rawVolumes = d.volumes;
+      const updated = await Promise.all([...instruments.values()].map(async instrument => ({
+        symbol: instrument.symbol,
+        data: await fetchPriceData(instrument.symbol, range, interval),
+      })));
+      updated.forEach(({ symbol, data }) => { instruments.get(symbol).priceData = data; });
+      const focused = instruments.get(activeSymbol);
+      renderHeader(elHdr, focused.priceData.meta, focused.funds);
       await applyData();
     } finally {
       elOverlay.style.display = 'none';
@@ -540,7 +658,7 @@ export async function renderStockTab(container) {
       chartType = btn.dataset.type;
       container.querySelectorAll('[data-type]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      if (rawCandles.length) await applyData();
+      if (instruments.size) await applyData();
     })
   );
 
@@ -549,14 +667,31 @@ export async function renderStockTab(container) {
       const ind = btn.dataset.ind;
       activeInds.has(ind) ? activeInds.delete(ind) : activeInds.add(ind);
       btn.classList.toggle('active', activeInds.has(ind));
-      if (rawCandles.length) await applyData();
+      if (instruments.size) await applyData();
     })
   );
 
   elAnnotBtn.addEventListener('click', () => {
     annotMode = !annotMode;
     elAnnotBtn.classList.toggle('active', annotMode);
+    elAnnotBtn.setAttribute('aria-pressed', String(annotMode));
+    elAnnotBtn.textContent = annotMode ? 'Click to place' : 'Place on chart';
     container.querySelector('#sa-chart-wrap').classList.toggle('sa-annotating', annotMode);
+  });
+
+  function addLevelFromInput() {
+    const price = Number(elLevelInput.value);
+    if (!elLevelInput.value.trim() || !Number.isFinite(price)) {
+      elLevelInput.focus();
+      return;
+    }
+    addPriceLevel(price);
+    elLevelInput.value = '';
+    elLevelInput.focus();
+  }
+  elLevelAdd.addEventListener('click', addLevelFromInput);
+  elLevelInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') addLevelFromInput();
   });
 
   // ── Cleanup ─────────────────────────────────────────────────────────────────
