@@ -328,6 +328,7 @@ export async function renderStockTab(container) {
   let chartType    = 'line';
   let rangeIdx     = 4;            // 1Y default
   let resizeObs    = null;
+  let chartThemeListener = null;
 
   // ── Element refs ────────────────────────────────────────────────────────────
   const elPh      = container.querySelector('#sa-ph');
@@ -346,28 +347,66 @@ export async function renderStockTab(container) {
   const elLevelInput = container.querySelector('#sa-level-input');
   const elLevelAdd = container.querySelector('#sa-level-add');
 
+  function chartThemeValues() {
+    const theme = document.documentElement.dataset.theme;
+    if (theme === 'more-visible') return { background: '#fffdf7', text: '#101820', grid: '#c3d0d9', border: '#293c4a', level: '#005a9c', fontSize: 15, lineWidth: 3, colors: ['#005a9c', '#9b3d00', '#006b3c', '#7b2f83', '#8a4b00', '#005b70', '#a51d37', '#34495e'], volumeUp: 'rgba(0,107,60,0.45)', volumeDown: 'rgba(180,35,24,0.45)' };
+    if (theme === 'light') return { background: '#f3f0e8', text: '#5e665e', grid: '#ded8cc', border: '#b7ad9d', level: '#9b641d', fontSize: 11, lineWidth: 2, colors: ['#9b641d', '#3575a8', '#b34f43', '#37845b', '#805b96', '#86751a', '#34817d', '#a34f73'], volumeUp: 'rgba(55,132,91,0.36)', volumeDown: 'rgba(179,79,67,0.36)' };
+    return { background: '#111413', text: '#99a49b', grid: '#303a33', border: '#47564b', level: '#e3a857', fontSize: 11, lineWidth: 2, colors: ['#e3a857', '#63a7d8', '#d77d72', '#72b58a', '#bc91cf', '#d9ca68', '#55b9b3', '#e28dab'], volumeUp: 'rgba(101,193,140,0.4)', volumeDown: 'rgba(223,124,112,0.4)' };
+  }
+
   // ── Chart init ──────────────────────────────────────────────────────────────
   async function ensureChart() {
     if (chart) return;
     const { createChart, CrosshairMode } = await getLWC();
+    const initialTheme = chartThemeValues();
 
     chart = createChart(elChartEl, {
       width:  elChartEl.clientWidth || 900,
       height: 480,
       layout: {
-        background: { color: '#0b0d14' },
-        textColor:  '#8892a4',
-        fontSize:   11,
+        background: { color: initialTheme.background },
+        textColor:  initialTheme.text,
+        fontSize:   initialTheme.fontSize,
         fontFamily: "'DM Mono', monospace",
       },
       grid: {
-        vertLines: { color: '#1a1d26' },
-        horzLines: { color: '#1a1d26' },
+        vertLines: { color: initialTheme.grid },
+        horzLines: { color: initialTheme.grid },
       },
       crosshair:       { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#2a2d3e' },
-      timeScale:       { borderColor: '#2a2d3e', timeVisible: true, secondsVisible: false },
+      leftPriceScale:  { visible: true, borderColor: initialTheme.border },
+      rightPriceScale: { borderColor: initialTheme.border },
+      timeScale:       { borderColor: initialTheme.border, timeVisible: true, secondsVisible: false },
     });
+
+    chartThemeListener = () => {
+      if (!chart) return;
+      const theme = chartThemeValues();
+      chart.applyOptions({
+        layout: { background: { color: theme.background }, textColor: theme.text, fontSize: theme.fontSize },
+        grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
+        leftPriceScale: { borderColor: theme.border },
+        rightPriceScale: { borderColor: theme.border },
+        timeScale: { borderColor: theme.border },
+      });
+      [...instruments.values()].forEach((instrument, index) => {
+        instrument.color = theme.colors[index % theme.colors.length];
+        const series = sm[instrument.symbol] ?? {};
+        series.main?.applyOptions({ color: instrument.color, lineWidth: theme.lineWidth });
+        series.vol?.setData(instrument.priceData.volumes.map(volume => ({
+          ...volume,
+          color: volume.color.includes('52,211,153') || volume.color.includes('101,193,140')
+            ? theme.volumeUp
+            : theme.volumeDown,
+        })));
+      });
+      annotLines.forEach(level => {
+        if (!level.line) return;
+        try { sm[level.symbol]?.main.removePriceLine(level.line); } catch {}
+        level.line = createPriceLine(level.price, level.symbol);
+      });
+    };
+    document.addEventListener('macro-theme-change', chartThemeListener);
 
     resizeObs = new ResizeObserver(() => {
       if (chart && elChartEl.clientWidth) chart.resize(elChartEl.clientWidth, 480);
@@ -410,12 +449,12 @@ export async function renderStockTab(container) {
     annotLines.forEach(level => { level.line = null; });
     renderAnnotList();
 
-    chart.priceScale('left').applyOptions({ visible: true, borderColor: '#2a2d3e', scaleMargins: { top: 0.06, bottom: activeInds.has('vol') ? 0.22 : 0.04 } });
-    chart.priceScale('right').applyOptions({ visible: true, borderColor: '#2a2d3e', scaleMargins: { top: 0.06, bottom: activeInds.has('vol') ? 0.22 : 0.04 } });
+    const theme = chartThemeValues();
+    chart.priceScale('left').applyOptions({ visible: true, borderColor: theme.border, scaleMargins: { top: 0.06, bottom: activeInds.has('vol') ? 0.22 : 0.04 } });
+    chart.priceScale('right').applyOptions({ visible: true, borderColor: theme.border, scaleMargins: { top: 0.06, bottom: activeInds.has('vol') ? 0.22 : 0.04 } });
 
-    const palette = ['#e3a857', '#63a7d8', '#d77d72', '#72b58a', '#bc91cf', '#d9ca68', '#55b9b3', '#e28dab'];
     for (const [index, instrument] of [...instruments.values()].entries()) {
-      instrument.color = palette[index % palette.length];
+      instrument.color = theme.colors[index % theme.colors.length];
       const priceScaleId = instrument.axis;
       sm[instrument.symbol] = {};
       if (chartType === 'candle') {
@@ -426,7 +465,7 @@ export async function renderStockTab(container) {
         });
         sm[instrument.symbol].main.setData(instrument.priceData.candles);
       } else {
-        sm[instrument.symbol].main = chart.addLineSeries({ color: instrument.color, lineWidth: 2, priceScaleId, title: instrument.symbol });
+        sm[instrument.symbol].main = chart.addLineSeries({ color: instrument.color, lineWidth: theme.lineWidth, priceScaleId, title: instrument.symbol });
         sm[instrument.symbol].main.setData(instrument.priceData.candles.map(c => ({ time: c.time, value: c.close })));
       }
 
@@ -449,7 +488,10 @@ export async function renderStockTab(container) {
     if (activeInds.has('vol') && volumeInstrument) {
       sm[volumeInstrument.symbol].vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
       chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-      sm[volumeInstrument.symbol].vol.setData(volumeInstrument.priceData.volumes);
+      sm[volumeInstrument.symbol].vol.setData(volumeInstrument.priceData.volumes.map(volume => ({
+        ...volume,
+        color: volume.color.includes('52,211,153') || volume.color.includes('101,193,140') ? theme.volumeUp : theme.volumeDown,
+      })));
     }
 
     annotLines.forEach(level => {
@@ -462,8 +504,9 @@ export async function renderStockTab(container) {
 
   function createPriceLine(price, symbol) {
     const { LineStyle } = _lwc;
+    const levelColor = chartThemeValues().level;
     return sm[symbol].main.createPriceLine({
-      price, color: instruments.get(symbol)?.color ?? '#e3a857', lineWidth: 1,
+      price, color: levelColor, lineWidth: 1,
       lineStyle: LineStyle.Dashed, axisLabelVisible: true,
       title: `${symbol} ${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     });
@@ -697,6 +740,7 @@ export async function renderStockTab(container) {
   // ── Cleanup ─────────────────────────────────────────────────────────────────
   return () => {
     resizeObs?.disconnect();
+    if (chartThemeListener) document.removeEventListener('macro-theme-change', chartThemeListener);
     if (chart) { chart.remove(); chart = null; }
     sm = {}; annotLines = [];
   };

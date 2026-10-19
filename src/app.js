@@ -13,11 +13,15 @@ let _teardown    = null;   // cleanup fn returned by active tab
 const THEME_KEY = 'macro-monitor-theme';
 
 function getTheme() {
-  try { return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    return ['dark', 'light', 'more-visible'].includes(saved) ? saved : 'dark';
+  } catch { return 'dark'; }
 }
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  document.dispatchEvent(new CustomEvent('macro-theme-change', { detail: { theme } }));
 }
 
 export function renderApp(root) {
@@ -30,7 +34,7 @@ export function renderApp(root) {
         <div class="topbar-center"><nav class="tabs" id="main-tabs">
           ${TABS.map(t => `<button class="tab ${t === _activeTab ? 'active' : ''}" data-tab="${t}"><span class="tab-num">${TAB_KICKERS[t]}</span>${TAB_LABELS[t]}</button>`).join('')}
         </nav></div>
-        <div class="topbar-right"><span class="market-status"><i></i> DATA LINKED</span><span class="topbar-date">${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="${initialTheme === 'light'}"><span class="theme-icon" aria-hidden="true">${initialTheme === 'light' ? 'D' : 'L'}</span><span class="theme-label">${initialTheme === 'light' ? 'Dark' : 'Light'}</span></button></div>
+        <div class="topbar-right"><span class="market-status"><i></i> DATA LINKED</span><span class="topbar-date">${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span><label class="theme-select-label" for="theme-select">Theme</label><select class="theme-select" id="theme-select" aria-label="Colour theme"><option value="dark"${initialTheme === 'dark' ? ' selected' : ''}>Dark</option><option value="light"${initialTheme === 'light' ? ' selected' : ''}>Light</option><option value="more-visible"${initialTheme === 'more-visible' ? ' selected' : ''}>More Visible</option></select></div>
       </header>
       <main class="main-content" id="tab-content"></main>
       <footer class="app-footer"><span>NSM / TERMINAL</span><span>MARKET DATA: YAHOO FINANCE · DELAYED / INDICATIVE</span><span>LOCAL SESSION</span></footer>
@@ -39,16 +43,12 @@ export function renderApp(root) {
 
   const tabsEl   = root.querySelector('#main-tabs');
   const contentEl = root.querySelector('#tab-content');
-  const themeToggle = root.querySelector('#theme-toggle');
+  const themeSelect = root.querySelector('#theme-select');
 
-  themeToggle.addEventListener('click', () => {
-    const nextTheme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-    applyTheme(nextTheme);
-    themeToggle.setAttribute('aria-pressed', String(nextTheme === 'light'));
-    themeToggle.setAttribute('aria-label', `Switch to ${nextTheme === 'light' ? 'dark' : 'light'} theme`);
-    themeToggle.querySelector('.theme-icon').textContent = nextTheme === 'light' ? 'D' : 'L';
-    themeToggle.querySelector('.theme-label').textContent = nextTheme === 'light' ? 'Dark' : 'Light';
-    try { localStorage.setItem(THEME_KEY, nextTheme); } catch {}
+  themeSelect.addEventListener('change', () => {
+    const theme = themeSelect.value;
+    applyTheme(theme);
+    try { localStorage.setItem(THEME_KEY, theme); } catch {}
   });
 
   function switchTab(tab) {
