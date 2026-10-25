@@ -95,16 +95,32 @@ async function fetchPriceData(symbol, range, interval) {
   const result = j?.chart?.result?.[0];
   if (!result) throw new Error('Symbol not found');
 
-  const times   = result.timestamp ?? [];
-  const q       = result.indicators.quote[0];
-  const candles = [], volumes = [];
+  const times = result.timestamp ?? [];
+  const q = result.indicators.quote[0];
+  const barsByDate = new Map();
 
   for (let i = 0; i < times.length; i++) {
     if (q.open[i] == null || q.close[i] == null) continue;
     const time = toDateStr(times[i]);
-    candles.push({ time, open: +q.open[i].toFixed(4), high: +q.high[i].toFixed(4), low: +q.low[i].toFixed(4), close: +q.close[i].toFixed(4) });
-    volumes.push({ time, value: q.volume[i] ?? 0, color: q.close[i] >= q.open[i] ? 'rgba(52,211,153,0.4)' : 'rgba(248,113,113,0.4)' });
+    // Some non-US listings return both a session close and a later live quote
+    // with the same calendar date. Lightweight Charts requires unique times.
+    barsByDate.set(time, {
+      time,
+      open: +q.open[i].toFixed(4),
+      high: +q.high[i].toFixed(4),
+      low: +q.low[i].toFixed(4),
+      close: +q.close[i].toFixed(4),
+      volume: q.volume[i] ?? 0,
+    });
   }
+
+  const candles = [...barsByDate.values()].sort((a, b) => a.time.localeCompare(b.time));
+  const volumes = candles.map(candle => ({
+    time: candle.time,
+    value: candle.volume,
+    color: candle.close >= candle.open ? 'rgba(52,211,153,0.4)' : 'rgba(248,113,113,0.4)',
+  }));
+  candles.forEach(candle => delete candle.volume);
 
   const data = { candles, volumes, meta: result.meta };
   priceCache.set(key, { ts: Date.now(), data });
@@ -122,9 +138,13 @@ async function fetchIndicatorData(symbol) {
   if (!result) throw new Error('Indicator history unavailable');
   const times = result.timestamp ?? [];
   const closes = result.indicators?.quote?.[0]?.close ?? [];
-  const candles = times.map((timestamp, i) => closes[i] == null ? null : ({
-    time: toDateStr(timestamp), close: +closes[i].toFixed(4),
-  })).filter(Boolean);
+  const candlesByDate = new Map();
+  times.forEach((timestamp, i) => {
+    if (closes[i] != null) candlesByDate.set(toDateStr(timestamp), {
+      time: toDateStr(timestamp), close: +closes[i].toFixed(4),
+    });
+  });
+  const candles = [...candlesByDate.values()].sort((a, b) => a.time.localeCompare(b.time));
   priceCache.set(key, { ts: Date.now(), data: candles });
   return candles;
 }
@@ -299,6 +319,7 @@ export async function renderStockTab(container) {
           <input class="sa-level-input" id="sa-level-input" type="number" inputmode="decimal" step="any" placeholder="Enter price" aria-label="Price level" />
           <button class="sa-opt" id="sa-level-add">Add level</button>
           <button class="sa-opt" id="sa-annot-btn" type="button" aria-pressed="false" title="Click the chart repeatedly to add horizontal levels">Place on chart</button>
+          <button class="sa-opt" id="sa-measure-btn" type="button" aria-pressed="false" title="Click two chart points to measure the move">Measure move</button>
           <span class="sa-tool-hint">Or click the chart to place multiple levels</span>
         </div>
 
@@ -311,6 +332,7 @@ export async function renderStockTab(container) {
         </div>
 
         <div class="sa-annot-list" id="sa-annot-list"></div>
+        <div class="sa-measure-list" id="sa-measure-list"></div>
         <div class="sa-funds" id="sa-funds"></div>
       </div>
     </div>
@@ -324,6 +346,10 @@ export async function renderStockTab(container) {
   let annotLines   = [];
   let nextAnnotId  = 1;
   let annotMode    = false;
+  let measureMode  = false;
+  let measureStart = null;
+  let measurements = [];
+  let nextMeasureId = 1;
   let activeInds   = new Set(['vol']);
   let chartType    = 'line';
   let rangeIdx     = 4;            // 1Y default
@@ -344,8 +370,10 @@ export async function renderStockTab(container) {
   const elTicker  = container.querySelector('#sa-ticker');
   const elGo      = container.querySelector('#sa-go');
   const elAnnotBtn = container.querySelector('#sa-annot-btn');
+  const elMeasureBtn = container.querySelector('#sa-measure-btn');
   const elLevelInput = container.querySelector('#sa-level-input');
   const elLevelAdd = container.querySelector('#sa-level-add');
+  const elMeasureList = container.querySelector('#sa-measure-list');
 
   function chartThemeValues() {
     const theme = document.documentElement.dataset.theme;
@@ -431,10 +459,21 @@ export async function renderStockTab(container) {
     // Click → add price line when in annotation mode
     chart.subscribeClick(param => {
       const main = activeSymbol && sm[activeSymbol]?.main;
-      if (!annotMode || !param.point || !main) return;
+      if (!param.point || !param.time || !main) return;
       const price = main.coordinateToPrice(param.point.y);
       if (price == null) return;
-      addPriceLevel(price, activeSymbol);
+      if (measureMode) {
+        if (!measureStart) {
+          measureStart = { symbol: activeSymbol, time: param.time, price };
+          renderMeasureList();
+        } else {
+          addMeasurement(measureStart, { symbol: activeSymbol, time: param.time, price });
+          measureStart = null;
+          renderMeasureList();
+        }
+        return;
+      }
+      if (annotMode) addPriceLevel(price, activeSymbol);
     });
   }
 
@@ -498,6 +537,11 @@ export async function renderStockTab(container) {
       const series = sm[level.symbol]?.main;
       level.line = series ? createPriceLine(level.price, level.symbol) : null;
     });
+    measurements.forEach(measurement => {
+      const series = sm[measurement.symbol]?.main;
+      measurement.startLine = series ? createPriceLine(measurement.startPrice, measurement.symbol) : null;
+      measurement.endLine = series ? createPriceLine(measurement.endPrice, measurement.symbol) : null;
+    });
 
     chart.timeScale().fitContent();
   }
@@ -516,6 +560,59 @@ export async function renderStockTab(container) {
     if (!Number.isFinite(price) || !sm[symbol]?.main) return;
     annotLines.push({ id: nextAnnotId++, price, symbol, line: createPriceLine(price, symbol) });
     renderAnnotList();
+  }
+
+  function chartTimeLabel(time) {
+    if (typeof time === 'string') return time;
+    if (time && typeof time === 'object') return `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`;
+    return 'point';
+  }
+
+  function addMeasurement(start, end) {
+    if (start.symbol !== end.symbol || start.price === 0) return;
+    measurements.push({
+      id: nextMeasureId++,
+      symbol: start.symbol,
+      startTime: chartTimeLabel(start.time),
+      endTime: chartTimeLabel(end.time),
+      startPrice: start.price,
+      endPrice: end.price,
+      startLine: createPriceLine(start.price, start.symbol),
+      endLine: createPriceLine(end.price, end.symbol),
+    });
+    renderMeasureList();
+  }
+
+  function renderMeasureList() {
+    const pending = measureStart
+      ? `<div class="sa-measure-pending">${measureStart.symbol} · ${chartTimeLabel(measureStart.time)} · ${measureStart.price.toLocaleString('en-US', { maximumFractionDigits: 4 })} <span>Click a second point</span></div>`
+      : '';
+    if (!measurements.length) {
+      elMeasureList.innerHTML = pending;
+      return;
+    }
+    elMeasureList.innerHTML = `${pending}${measurements.map(measurement => {
+      const absolute = measurement.endPrice - measurement.startPrice;
+      const percent = (absolute / measurement.startPrice) * 100;
+      const cls = absolute >= 0 ? 'up' : 'dn';
+      return `<div class="sa-measure-row">
+        <span class="sa-measure-symbol">${measurement.symbol}</span>
+        <span>${measurement.startTime} → ${measurement.endTime}</span>
+        <strong class="${cls}">${absolute >= 0 ? '+' : ''}${absolute.toLocaleString('en-US', { maximumFractionDigits: 4 })} (${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%)</strong>
+        <button class="sa-annot-x" data-measure-id="${measurement.id}" aria-label="Remove measurement">×</button>
+      </div>`;
+    }).join('')}`;
+    elMeasureList.querySelectorAll('[data-measure-id]').forEach(button => {
+      button.addEventListener('click', () => {
+        const index = measurements.findIndex(measurement => measurement.id === Number(button.dataset.measureId));
+        if (index < 0) return;
+        const measurement = measurements[index];
+        try { sm[measurement.symbol]?.main.removePriceLine(measurement.startLine); } catch {}
+        try { sm[measurement.symbol]?.main.removePriceLine(measurement.endLine); } catch {}
+        measurements.splice(index, 1);
+        renderMeasureList();
+      });
+    });
   }
 
   // ── Annotation list ─────────────────────────────────────────────────────────
@@ -595,6 +692,8 @@ export async function renderStockTab(container) {
     if (!instruments.has(symbol)) return;
     instruments.delete(symbol);
     annotLines = annotLines.filter(level => level.symbol !== symbol);
+    measurements = measurements.filter(measurement => measurement.symbol !== symbol);
+    if (measureStart?.symbol === symbol) measureStart = null;
     if (activeSymbol === symbol) activeSymbol = [...instruments.keys()].at(-1) ?? null;
     if (!instruments.size) {
       elMain.style.display = 'none';
@@ -715,11 +814,35 @@ export async function renderStockTab(container) {
   );
 
   elAnnotBtn.addEventListener('click', () => {
+    if (measureMode) {
+      measureMode = false;
+      measureStart = null;
+      elMeasureBtn.classList.remove('active');
+      elMeasureBtn.setAttribute('aria-pressed', 'false');
+      elMeasureBtn.textContent = 'Measure move';
+      renderMeasureList();
+    }
     annotMode = !annotMode;
     elAnnotBtn.classList.toggle('active', annotMode);
     elAnnotBtn.setAttribute('aria-pressed', String(annotMode));
     elAnnotBtn.textContent = annotMode ? 'Click to place' : 'Place on chart';
     container.querySelector('#sa-chart-wrap').classList.toggle('sa-annotating', annotMode);
+  });
+
+  elMeasureBtn.addEventListener('click', () => {
+    if (annotMode) {
+      annotMode = false;
+      elAnnotBtn.classList.remove('active');
+      elAnnotBtn.setAttribute('aria-pressed', 'false');
+      elAnnotBtn.textContent = 'Place on chart';
+    }
+    measureMode = !measureMode;
+    measureStart = null;
+    elMeasureBtn.classList.toggle('active', measureMode);
+    elMeasureBtn.setAttribute('aria-pressed', String(measureMode));
+    elMeasureBtn.textContent = measureMode ? 'Click first point' : 'Measure move';
+    container.querySelector('#sa-chart-wrap').classList.toggle('sa-measuring', measureMode);
+    renderMeasureList();
   });
 
   function addLevelFromInput() {
@@ -742,6 +865,6 @@ export async function renderStockTab(container) {
     resizeObs?.disconnect();
     if (chartThemeListener) document.removeEventListener('macro-theme-change', chartThemeListener);
     if (chart) { chart.remove(); chart = null; }
-    sm = {}; annotLines = [];
+    sm = {}; annotLines = []; measurements = []; measureStart = null;
   };
 }

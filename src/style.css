@@ -733,6 +733,7 @@ td.pct-cell { min-width: 60px; }
   overflow: hidden; border: 1px solid var(--border);
 }
 .sa-annotating { cursor: crosshair; }
+.sa-measuring { cursor: crosshair; }
 .sa-overlay {
   position: absolute; inset: 0; background: rgba(11,13,20,0.7);
   display: flex; align-items: center; justify-content: center; z-index: 10;
@@ -770,6 +771,13 @@ td.pct-cell { min-width: 60px; }
   cursor: pointer; font-size: 14px; line-height: 1; padding: 0;
 }
 .sa-annot-x:hover { color: var(--red); }
+.sa-measure-list { display: flex; flex-direction: column; gap: 6px; }
+.sa-measure-row, .sa-measure-pending { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 10px; border-left: 3px solid var(--accent); background: var(--bg-surface); color: var(--text-muted); font: 11px var(--font-mono); }
+.sa-measure-row strong { margin-left: auto; }
+.sa-measure-symbol { color: var(--accent); font-weight: 600; }
+.sa-measure-pending span { color: var(--text-faint); font-family: var(--font-main); }
+html[data-theme="more-visible"] .sa-measure-row,
+html[data-theme="more-visible"] .sa-measure-pending { border-left-width: 4px; border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 14px; }
 
 /* Fundamentals */
 .sa-section-label {
